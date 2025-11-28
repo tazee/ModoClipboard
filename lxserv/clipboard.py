@@ -4,6 +4,7 @@
 
 import lx
 import modo
+import logging
 import json
 import sys
 import subprocess
@@ -228,10 +229,128 @@ def paste_from_clipboard(external_clipboard='CLIPBOARD', new_mesh=False):
         for material in materials_in:
             name = material.get('name', '')
             col = material.get('base_color', ())
-            mat = scene.addMaterial()
+            mat = scene.addMaterial(name='M_' + name)
             mat.channel('diffCol').set(col)
             mask = scene.addItem('mask', name=name)
             mask.channel('ptag').set(name)
             mat.setParent(mask, index=1)
 
         geo.setMeshEdits()
+
+def get_material_index(name, material_out):
+    for i, mat in enumerate(material_out):
+        if mat['name'] == name:
+            return i
+    return 0
+
+def copy_to_clipboard(external_clipboard='CLIPBOARD'):
+    print(f'Copying to external clipboard: {external_clipboard}')
+
+    scene = modo.Scene()
+    mesh = scene.selectedByType("mesh")
+    if not mesh:
+        return False
+
+    mesh = mesh[0]
+    scene.select(mesh)
+
+    pos = mesh.position.get()
+    scl = mesh.scale.get()
+    print(f'Mesh position: {pos} scale: {scl}')
+
+    locator = lx.object.Locator(mesh)
+    chan_read = lx.object.ChannelRead(scene.Channels(None, 0.0))
+    transforms = locator.LocalTransform(chan_read)
+
+    quat = modo.Quaternion()
+    quat.fromMatrix3(transforms[0])
+
+    # Query Existing Materials
+
+    materials_out = []
+    for material in scene.items("advancedMaterial"):
+        mask = material.parent
+        if not mask or mask.type != 'mask':
+            name = 'Default'
+        else:
+            name = mask.channel('ptag').get()
+        diffCol = material.channel('diffCol').get()
+        mat_data = {
+            'name': name,
+            'base_color': diffCol,
+            'textures': []
+        }
+        materials_out.append(mat_data)
+
+    # vertices
+    positions = []
+    for v in mesh.geometry.vertices:
+        positions.append([v.position[0], v.position[1], v.position[2]])
+
+    # faces
+    polygons = []
+    for p in mesh.geometry.polygons:
+        p_attrs = {
+            'material_index': get_material_index(p.materialTag, materials_out)
+        }
+        polygons.append({
+            'vertices': [v.index for v in p.vertices],
+            'attributes': p_attrs
+        })
+
+    cobj = {
+        'name': mesh.name,
+        'object_transform': {
+            'translation': [pos],
+            'rotation_quat': [quat[0], quat[1], quat[2], quat[3]],
+            'scale': [scl[0], scl[1], scl[2]]
+        },
+        'mesh': {
+            'attributes': {
+                'POSITION': positions,
+                'NORMAL': []
+            },
+            'vertices': [],
+            'uv_sets': [],   # v1.5: multiple UV sets
+            'edges': [],
+            'polygons': polygons
+        }
+    }
+
+    if materials_out:
+        cobj['mesh']['materials'] = materials_out
+
+    data = {
+        'type': 'CPMF',
+        'version': '1.0',
+        'metadata': {
+            'source_app': 'Modo',
+            'coordinate_system': 'modo_y_up_rh',
+            'unit_scale': 1.0,
+            'timestamp': datetime.utcnow().isoformat() + 'Z'
+        },
+        'objects': [cobj]
+    }
+
+    txt = json.dumps(data, indent=2)
+
+    # File
+    if external_clipboard == 'TEMPFILE':
+        try:
+            path = get_cpmf_tempfile_path()
+            print(f'Temporary file created at: {path}')
+            written = write_tempfile(txt, path)
+            logging.info(f'CPMF saved to file: {written}')
+        except Exception as e:
+            logging.error(f'Failed to write file: {e}')
+            return False
+    # Clipboard
+    else:
+        try:
+            clipboard_copy(txt)
+        except Exception as e:
+            logging.error(f'Clipboard copy failed: {e}')
+            # continue: maybe file write still possible
+
+    logging.info('CPMF v1.0 export completed')
+    return True
