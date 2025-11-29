@@ -182,13 +182,10 @@ def paste_from_clipboard(external_clipboard='CLIPBOARD', new_mesh=False):
 
     for obj_data in data.get('objects', []):
         mesh_data = obj_data.get('mesh', {})
-        attrs = mesh_data.get('attributes', {})
-        positions_in = attrs.get('POSITION', [])
-        per_vertices = mesh_data.get('vertices', [])
-        edges_in = mesh_data.get('edges', [])
+        positions = mesh_data.get('positions', [])
+        edges = mesh_data.get('edges', [])
         polygons = mesh_data.get('polygons', [])
-        uv_sets_in = mesh_data.get('uv_sets', [])
-        materials_in = mesh_data.get('materials', []) or mesh_data.get('mesh', {}).get('materials', []) or mesh_data.get('materials', [])
+        materials = mesh_data.get('materials', []) or mesh_data.get('mesh', {}).get('materials', []) or mesh_data.get('materials', [])
 
         if new_mesh == True:
             mesh = scene.addMesh("Mesh")
@@ -205,7 +202,7 @@ def paste_from_clipboard(external_clipboard='CLIPBOARD', new_mesh=False):
     
         # convert positions and apply unit scale
         vertices = []
-        for p in positions_in:
+        for p in positions:
             v = convert_vector_from_coord(p, coord)
             v *= unit_scale
             print(f'pos: {p} v : {v}')
@@ -220,13 +217,13 @@ def paste_from_clipboard(external_clipboard='CLIPBOARD', new_mesh=False):
             if 'material_index' in attributes:
                 try:
                     material_index = int(attributes['material_index'])
-                    if material_index is not None and 0 <= material_index < len(materials_in):
-                        geo.polygons[count].materialTag = materials_in[material_index].get('name', '')
+                    if material_index is not None and 0 <= material_index < len(materials):
+                        geo.polygons[count].materialTag = materials[material_index].get('name', '')
                 except Exception:
                     pass
             count += 1
 
-        for material in materials_in:
+        for material in materials:
             name = material.get('name', '')
             col = material.get('base_color', ())
             mat = scene.addMaterial(name='M_' + name)
@@ -244,7 +241,7 @@ def get_material_index(name, material_out):
     return 0
 
 def copy_to_clipboard(external_clipboard='CLIPBOARD'):
-    print(f'Copying to external clipboard: {external_clipboard}')
+    lx.out(f'Copying to external clipboard: {external_clipboard}')
 
     scene = modo.Scene()
     mesh = scene.selectedByType("mesh")
@@ -256,7 +253,7 @@ def copy_to_clipboard(external_clipboard='CLIPBOARD'):
 
     pos = mesh.position.get()
     scl = mesh.scale.get()
-    print(f'Mesh position: {pos} scale: {scl}')
+    lx.out(f'Mesh position: {pos} scale: {scl}')
 
     locator = lx.object.Locator(mesh)
     chan_read = lx.object.ChannelRead(scene.Channels(None, 0.0))
@@ -280,12 +277,37 @@ def copy_to_clipboard(external_clipboard='CLIPBOARD'):
             'base_color': diffCol,
             'textures': []
         }
+        lx.out(f'Found material: {name} color: {diffCol}')
         materials_out.append(mat_data)
+
+    subdiv_map = None
+    for vmap in mesh.geometry.vmaps:
+        if vmap.map_type == lx.symbol.i_VMAP_SUBDIV:
+            subdiv_map = vmap
+            lx.out(f'Found vmap: {vmap.name} type: {vmap.map_type} len: {len(vmap)}')
+            break
+
+    crease_edges = [0.0] * len(mesh.geometry.edges)
+    if subdiv_map:
+        lx.out(f'subdiv map {len(subdiv_map)}')
+        for i, w in enumerate(subdiv_map):
+            if w is not None:
+                crease_edges[i] = w[0]
 
     # vertices
     positions = []
     for v in mesh.geometry.vertices:
         positions.append([v.position[0], v.position[1], v.position[2]])
+
+    # edges
+    edges = []
+    for i, e in enumerate(mesh.geometry.edges):
+        edges.append({
+            'vertices': [v.index for v in e.vertices],
+            'attributes': {
+                'crease_edge': crease_edges[i]
+            }
+        })
 
     # faces
     polygons = []
@@ -300,47 +322,45 @@ def copy_to_clipboard(external_clipboard='CLIPBOARD'):
 
     cobj = {
         'name': mesh.name,
+        'type': 'MESH',
         'object_transform': {
-            'translation': [pos],
+            'translation': [pos[0], pos[1], pos[2]],
             'rotation_quat': [quat[0], quat[1], quat[2], quat[3]],
             'scale': [scl[0], scl[1], scl[2]]
         },
         'mesh': {
-            'attributes': {
-                'POSITION': positions,
-                'NORMAL': []
-            },
-            'vertices': [],
-            'uv_sets': [],   # v1.5: multiple UV sets
-            'edges': [],
-            'polygons': polygons
+            'positions': positions,
+            'edges': edges,
+            'polygons': polygons,
+            'materials': materials_out
         }
     }
-
-    if materials_out:
-        cobj['mesh']['materials'] = materials_out
 
     data = {
         'type': 'CPMF',
         'version': '1.0',
         'metadata': {
             'source_app': 'Modo',
-            'coordinate_system': 'modo_y_up_rh',
+            'coordinate_system': 'y_up_rh',
             'unit_scale': 1.0,
             'timestamp': datetime.utcnow().isoformat() + 'Z'
         },
         'objects': [cobj]
     }
+    lx.out(f'Generated CPMF v1.0 data {external_clipboard}')
 
-    txt = json.dumps(data, indent=2)
+    try:
+        txt = json.dumps(data, indent=4)
+    except Exception as e:
+        logging.error(f'Failed to dump JSON: {e}')
+        return False
 
     # File
     if external_clipboard == 'TEMPFILE':
         try:
             path = get_cpmf_tempfile_path()
-            print(f'Temporary file created at: {path}')
+            lx.out(f'Temporary file created at: {path}')
             written = write_tempfile(txt, path)
-            logging.info(f'CPMF saved to file: {written}')
         except Exception as e:
             logging.error(f'Failed to write file: {e}')
             return False
@@ -352,5 +372,5 @@ def copy_to_clipboard(external_clipboard='CLIPBOARD'):
             logging.error(f'Clipboard copy failed: {e}')
             # continue: maybe file write still possible
 
-    logging.info('CPMF v1.0 export completed')
+    lx.out('CPMF v1.0 export completed')
     return True
