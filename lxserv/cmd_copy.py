@@ -28,7 +28,8 @@ class ClipboardCopy(lxu.command.BasicCommand):
 
     def basic_Execute(self, msg, flags):
         lx.out("ClipboardCopy: Executing Copy to External")
-        clipboard.copy_to_clipboard(external_clipboard='CLIPBOARD')
+        type = lx.eval("user.value clipboard.type ?")
+        clipboard.copy_to_clipboard(external_clipboard=type)
 
     def cmd_Query(self, index, vaQuery):
         lx.notimpl()

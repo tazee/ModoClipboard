@@ -14,8 +14,9 @@ import clipboard
 class ClipboardPaste(lxu.command.BasicCommand):
 
     def __init__(self):
-        lx.out("ClipboardPaste: initializing")
         lxu.command.BasicCommand.__init__(self)
+        self.dyna_Add("new_mesh", lx.symbol.sTYPE_BOOLEAN)
+        self.basic_SetFlags(0, lx.symbol.fCMDARG_OPTIONAL)
 
     def cmd_Flags(self):
         return lx.symbol.fCMD_MODEL | lx.symbol.fCMD_UNDO
@@ -27,8 +28,10 @@ class ClipboardPaste(lxu.command.BasicCommand):
         pass
 
     def basic_Execute(self, msg, flags):
-        lx.out("ClipboardPaste: Executing Paste to External")
-        clipboard.paste_from_clipboard(external_clipboard='CLIPBOARD', new_mesh=False)
+        type = lx.eval("user.value clipboard.type ?")
+        new_mesh = self.dyna_Int(0)
+        lx.out(f"ClipboardPaste: Executing Paste to External {new_mesh}")
+        clipboard.paste_from_clipboard(external_clipboard=type, new_mesh=new_mesh)
 
     def cmd_Query(self, index, vaQuery):
         lx.notimpl()
