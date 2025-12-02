@@ -16,6 +16,8 @@ class ClipboardCopy(lxu.command.BasicCommand):
     def __init__(self):
         lx.out("ClipboardCopy: initializing")
         lxu.command.BasicCommand.__init__(self)
+        self.dyna_Add("cut", lx.symbol.sTYPE_BOOLEAN)
+        self.basic_SetFlags(0, lx.symbol.fCMDARG_OPTIONAL)
 
     def cmd_Flags(self):
         return lx.symbol.fCMD_MODEL | lx.symbol.fCMD_UNDO
@@ -30,6 +32,9 @@ class ClipboardCopy(lxu.command.BasicCommand):
         lx.out("ClipboardCopy: Executing Copy to External")
         type = lx.eval("user.value clipboard.type ?")
         clipboard.copy_to_clipboard(external_clipboard=type)
+        cut = self.dyna_Int(0)
+        if cut:
+            lx.eval("select.delete")
 
     def cmd_Query(self, index, vaQuery):
         lx.notimpl()

@@ -240,6 +240,76 @@ def get_material_index(name, material_out):
             return i
     return 0
 
+def extract_uv_sets(mesh):
+    uv_sets = []
+    for vmap in mesh.geometry.vmaps.uvMaps:
+        uv_set = {
+            'name': vmap.name,
+            'uvs': []
+        }
+        for p in mesh.geometry.polygons:
+            face_uvs = {
+                'index': p.index,
+                'values': []
+            }
+            for v in p.vertices:
+                uv = p.getUV(v, uvmap=vmap)
+                face_uvs['values'].append([uv[0], uv[1]])
+            uv_set['uvs'].append(face_uvs)
+        uv_sets.append(uv_set)
+    if len(uv_sets) == 0:
+        return None
+    return uv_sets
+
+def extract_vertex_groups(mesh):
+    vertex_groups = []
+    for vmap in mesh.geometry.vmaps:
+        if vmap.map_type != lx.symbol.i_VMAP_WEIGHT:
+            continue
+        vg_data = {
+            'name': vmap.name,
+            'weights': []
+        }
+        for v in mesh.geometry.vertices:
+            w = vmap[v.index]
+            if w is not None:
+                vg_data['weights'].append({'index': v.index, 'weight': w})
+        vertex_groups.append(vg_data)
+        print(f"-- weight map {vmap.name} size {len(vertex_groups)}")
+    if len(vertex_groups) == 0:
+        return None
+    return vertex_groups
+
+def extract_vertex_shapekeys(mesh):
+    if len(mesh.geometry.vmaps.morphMaps) == 0:
+        return None
+    shapekeys = []
+    # Add Basis positions
+    sk_data = {
+        'name': 'Basis',
+        'relative': True,
+        'positions': []
+    }
+    for v in mesh.geometry.vertices:
+        sk_data['positions'].append({'index': v.index, 'position':[v.position[0], v.position[1], v.position[2]]})
+    shapekeys.append(sk_data)
+    # Add all morph and spot vertex maps
+    for vmap in mesh.geometry.vmaps.morphMaps:
+        relative = True if (vmap.map_type == lx.symbol.i_VMAP_MORPH) else False
+        sk_data = {
+            'name': vmap.name,
+            'relative': relative,
+            'positions': []
+        }
+        for v in mesh.geometry.vertices:
+            co = vmap.getAbsolutePosition(v.index)
+            sk_data['positions'].append({'index': v.index, 'position':[co[0], co[1], co[2]]})
+        shapekeys.append(sk_data)
+        print(f"-- morph map {vmap.name} relative {relative} map_type {vmap.map_type}")
+    if len(shapekeys) == 0:
+        return None
+    return shapekeys
+
 def copy_to_clipboard(external_clipboard='CLIPBOARD'):
     lx.out(f'Copying to external clipboard: {external_clipboard}')
 
@@ -280,24 +350,22 @@ def copy_to_clipboard(external_clipboard='CLIPBOARD'):
         lx.out(f'Found material: {name} color: {diffCol}')
         materials_out.append(mat_data)
 
-    subdiv_map = None
-    for vmap in mesh.geometry.vmaps:
-        if vmap.map_type == lx.symbol.i_VMAP_SUBDIV:
-            subdiv_map = vmap
-            lx.out(f'Found vmap: {vmap.name} type: {vmap.map_type} len: {len(vmap)}')
-            break
-
-    crease_edges = [0.0] * len(mesh.geometry.edges)
-    if subdiv_map:
-        lx.out(f'subdiv map {len(subdiv_map)}')
-        for i, w in enumerate(subdiv_map):
-            if w is not None:
-                crease_edges[i] = w[0]
-
     # vertices
     positions = []
     for v in mesh.geometry.vertices:
         positions.append([v.position[0], v.position[1], v.position[2]])
+
+    # crease edges
+    crease_edges = [0.0] * len(mesh.geometry.edges)
+    for vmap in mesh.geometry.vmaps:
+        if vmap.map_type == lx.symbol.i_VMAP_SUBDIV:
+            lx.out(f'Found vmap: {vmap.name} type: {vmap.map_type} len: {len(vmap)}')
+            storageBuffer = lx.object.storage('f', 1)
+            for i, e in enumerate(mesh.geometry.edges):
+                if e.MapEvaluate(vmap.id, storageBuffer) == True:
+                    w = storageBuffer.get()
+                    crease_edges[i] = w[0]
+            break
 
     # edges
     edges = []
@@ -335,6 +403,21 @@ def copy_to_clipboard(external_clipboard='CLIPBOARD'):
             'materials': materials_out
         }
     }
+
+    # export UV maps
+    uv_sets = extract_uv_sets(mesh)
+    if uv_sets:
+        cobj['mesh']['uv_sets'] = uv_sets
+
+    # export morph maps
+    shapekeys = extract_vertex_shapekeys(mesh)
+    if shapekeys:
+        cobj['mesh']['shapekeys'] = shapekeys
+
+    # export weight maps
+    vertex_groups = extract_vertex_groups(mesh)
+    if vertex_groups:
+        cobj['mesh']['vertex_groups'] = vertex_groups
 
     data = {
         'type': 'CPMF',
