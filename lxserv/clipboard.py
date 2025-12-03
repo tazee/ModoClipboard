@@ -162,6 +162,26 @@ class ClipboardData:
 
     def index(self, v):
         return self.vertex_indices[v.index]
+    
+    def lookupMap(self, map_type, name):
+        for vmap in self.geom.vmaps:
+            if vmap.map_type == map_type and vmap.name == name:
+                return vmap
+        return None
+
+    def setWeight(self, vmap, v, weight):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(1)
+        storage.set([weight])
+        v.accessor.SetMapValue(vmap.id, storage)
+
+    def setMorph(self, vmap, v, pos):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(3)
+        storage.set(pos)
+        v.accessor.SetMapValue(vmap.id, storage)
 
     def setup_mesh_elements(self):
         # store selected vertices
@@ -195,6 +215,75 @@ class ClipboardData:
         else:
             return True if len(self.polygons) > 0 else False
 
+    def paste_vertices(self, positions):
+        coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
+        unit_scale = float(self.data.get('metadata', {}).get('unit_scale', 1.0))
+        self.vertices = []
+        for p in positions:
+            v = convert_vector_from_coord(p, coord)
+            v *= unit_scale
+            print(f'pos: {p} v : {v}')
+            self.vertices.append(self.geom.vertices.new((v.x, v.y, v.z)))
+
+    def paste_polygons(self, polygons, materials):
+        count = 0
+        for poly in polygons:
+            vert_indices = poly.get('vertices', [])
+            face_verts = [self.vertices[i] for i in vert_indices]
+            p = self.geom.polygons.new(face_verts)
+            self.polygons.append(p)
+            attributes = poly.get('attributes', {})
+            if 'material_index' in attributes:
+                try:
+                    material_index = int(attributes['material_index'])
+                    if material_index is not None and 0 <= material_index < len(materials):
+                        self.geom.polygons[count].materialTag = materials[material_index].get('name', '')
+                except Exception:
+                    pass
+            count += 1
+    
+    def paste_edges(self, edges):
+        for e in edges:
+            v0, v1 = e.get('vertices', [])
+
+    def paste_materials(self, materials):
+        for material in materials:
+            name = material.get('name', '')
+            col = material.get('base_color', ())
+            mat = self.scene.addMaterial(name='M_' + name)
+            mat.channel('diffCol').set(col)
+            mask = self.scene.addItem('mask', name=name)
+            mask.channel('ptag').set(name)
+            mat.setParent(mask, index=1)
+
+    def paste_uv_sets(self, uv_sets):
+        for uv_set in uv_sets:
+            name = uv_set.get('name', '')
+            vmap = self.lookupMap(lx.symbol.i_VMAP_TEXTUREUV, name)
+            if not vmap:
+                vmap = self.geom.vmaps.addUVMap(name)
+            for face_uvs in uv_set.get('uvs', []):
+                index = face_uvs.get('index')
+                values = face_uvs.get('values', [])
+                p = self.polygons[index]
+                for i, v in enumerate(p.vertices):
+                    uv = values[i]
+                    p.setUV(uv, v, uvmap=vmap)
+
+    def paste_vertex_groups(self, vertex_groups):
+        for vertex_group in vertex_groups:
+            name = vertex_group.get('name', '')
+            weights = vertex_group.get('weights', [])
+            vmap = self.lookupMap(lx.symbol.i_VMAP_WEIGHT, name)
+            if not vmap:
+                vmap = self.geom.vmaps.addWeightMap(name)
+            for w_data in weights:
+                index = w_data.get('index')
+                weight = w_data.get('weight', 0.0)
+                v = self.vertices[index]
+                self.setWeight(vmap, v, weight)
+
+
 
     # Main paste function
     def paste(self, external_clipboard='CLIPBOARD', new_mesh=False):
@@ -219,74 +308,63 @@ class ClipboardData:
 
         # parse
         try:
-            data = json.loads(txt)
+            self.data = json.loads(txt)
         except Exception as e:
             lx.out({'ERROR'}, f'Invalid JSON: {e}')
             return False
         
-        # same import logic as before (coordinate conversion, materials, UVs, groups, shape keys...)
-        coord = data.get('metadata', {}).get('coordinate_system', '').lower()
-        unit_scale = float(data.get('metadata', {}).get('unit_scale', 1.0))
-        base_dir = data.get('metadata', {}).get('custom', {}).get('base_dir', None)
-        print(f'Coordinate system: {coord}, unit scale: {unit_scale}, base_dir: {base_dir}')
-        
         # Add a new mesh object to the scene and grab the geometry object
-        scene = modo.Scene()
+        self.scene = modo.Scene()
 
-        for obj_data in data.get('objects', []):
+        for obj_data in self.data.get('objects', []):
             mesh_data = obj_data.get('mesh', {})
             positions = mesh_data.get('positions', [])
             edges = mesh_data.get('edges', [])
             polygons = mesh_data.get('polygons', [])
             materials = mesh_data.get('materials', []) or mesh_data.get('mesh', {}).get('materials', []) or mesh_data.get('materials', [])
+            uv_sets = mesh_data.get('uv_sets', [])
+            shapekeys = mesh_data.get('shapekeys', [])
+            vertex_groups = mesh_data.get('vertex_groups', [])
 
             if new_mesh == True:
-                mesh = scene.addMesh("Mesh")
+                mesh = self.scene.addMesh("Mesh")
             else:
-                mesh = scene.selectedByType("mesh")
+                mesh = self.scene.selectedByType("mesh")
                 if mesh:
                     mesh = mesh[0]
-                    scene.select(mesh)
+                    self.scene.select(mesh)
                 else:
                     lx.out({'ERROR'}, 'No mesh selected to paste into')
                     return False
 
             self.mesh = mesh
-            geo = mesh.geometry
+            self.geom = mesh.geometry
         
-            # convert positions and apply unit scale
-            vertices = []
-            for p in positions:
-                v = convert_vector_from_coord(p, coord)
-                v *= unit_scale
-                print(f'pos: {p} v : {v}')
-                vertices.append(geo.vertices.new((v.x, v.y, v.z)))
+            # paste positions to geometry and apply unit scale
+            if positions:
+                self.paste_vertices(positions)
 
-            count = 0
-            for poly in polygons:
-                vert_indices = poly.get('vertices', [])
-                face_verts = [vertices[i] for i in vert_indices]
-                geo.polygons.new(face_verts)
-                attributes = poly.get('attributes', {})
-                if 'material_index' in attributes:
-                    try:
-                        material_index = int(attributes['material_index'])
-                        if material_index is not None and 0 <= material_index < len(materials):
-                            geo.polygons[count].materialTag = materials[material_index].get('name', '')
-                    except Exception:
-                        pass
-                count += 1
+            # paste polygons data to geometry
+            if polygons:
+                self.paste_polygons(polygons, materials)
 
-            for material in materials:
-                name = material.get('name', '')
-                col = material.get('base_color', ())
-                mat = scene.addMaterial(name='M_' + name)
-                mat.channel('diffCol').set(col)
-                mask = scene.addItem('mask', name=name)
-                mask.channel('ptag').set(name)
-                mat.setParent(mask, index=1)
+            # paste edges data to geometry
+            if edges:
+                self.paste_edges(edges)
 
-            geo.setMeshEdits()
+            # paste materials data to geometry
+            if materials:
+                self.paste_materials(materials)
+
+            # paste uv sets data to geometry
+            if uv_sets:
+                self.paste_uv_sets(uv_sets)
+
+            # paste vertex groups data to geometry
+            if vertex_groups:
+                self.paste_vertex_groups(vertex_groups)
+
+            self.geom.setMeshEdits()
 
     def get_material_index(self, name, material_out):
         for i, mat in enumerate(material_out):
