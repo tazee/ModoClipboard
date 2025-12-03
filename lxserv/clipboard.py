@@ -160,30 +160,31 @@ class ClipboardData:
     def selected(self, v):
         return v.accessor.TestMarks(self.mark_select)
 
-    def vidx(self, v):
-        return self.vertex_indices[v]
+    def index(self, v):
+        return self.vertex_indices[v.index]
 
     def setup_mesh_elements(self):
         # store selected vertices
         self.vertex_indices = {}
         self.vertices.clear()
         index = 0
-        for v in self.mesh.geometry.vertices:
+        for v in self.geom.vertices:
             if self.selected(v):
-                self.vertex_indices[v] = index
+                self.vertex_indices[v.index] = index
                 self.vertices.append(v)
+                print(f"-- store vertex {v.index} --> {self.index(v)}")
                 index += 1
 
         # store selected edges
         self.edges.clear()
-        for e in self.mesh.geometry.edges:
+        for e in self.geom.edges:
             v0, v1 = e.vertices
             if self.selected(v0) and self.selected(v1):
                 self.edges.append(e)
 
         # store selected polygons
-        self.edges.clear()
-        for p in self.mesh.geometry.polygons:
+        self.polygons.clear()
+        for p in self.geom.polygons:
             if self.selected(p):
                 self.polygons.append(p)
 
@@ -294,15 +295,17 @@ class ClipboardData:
         return 0
 
     def extract_uv_sets(self):
+        if len(self.polygons) == 0:
+            return None
         uv_sets = []
-        for vmap in self.mesh.geometry.vmaps.uvMaps:
+        for vmap in self.geom.vmaps.uvMaps:
             uv_set = {
                 'name': vmap.name,
                 'uvs': []
             }
-            for p in self.mesh.geometry.polygons:
+            for i, p in enumerate(self.polygons):
                 face_uvs = {
-                    'index': p.index,
+                    'index': i,
                     'values': []
                 }
                 for v in p.vertices:
@@ -315,18 +318,20 @@ class ClipboardData:
         return uv_sets
 
     def extract_vertex_groups(self):
+        if len(self.vertices) == 0:
+            return None
         vertex_groups = []
-        for vmap in self.mesh.geometry.vmaps:
+        for vmap in self.geom.vmaps:
             if vmap.map_type != lx.symbol.i_VMAP_WEIGHT:
                 continue
             vg_data = {
                 'name': vmap.name,
                 'weights': []
             }
-            for v in self.mesh.geometry.vertices:
+            for v in self.vertices:
                 w = vmap[v.index]
                 if w is not None:
-                    vg_data['weights'].append({'index': v.index, 'weight': w[0]})
+                    vg_data['weights'].append({'index': self.index(v), 'weight': w[0]})
             vertex_groups.append(vg_data)
             print(f"-- weight map {vmap.name} size {len(vertex_groups)}")
         if len(vertex_groups) == 0:
@@ -334,7 +339,9 @@ class ClipboardData:
         return vertex_groups
 
     def extract_vertex_shapekeys(self):
-        if len(self.mesh.geometry.vmaps.morphMaps) == 0:
+        if len(self.geom.vmaps.morphMaps) == 0:
+            return None
+        if len(self.vertices) == 0:
             return None
         shapekeys = []
         # Add Basis positions
@@ -343,90 +350,33 @@ class ClipboardData:
             'relative': True,
             'positions': []
         }
-        for v in self.mesh.geometry.vertices:
-            sk_data['positions'].append({'index': v.index, 'position':[v.position[0], v.position[1], v.position[2]]})
+        for v in self.vertices:
+            sk_data['positions'].append({'index': self.index(v), 'position':[v.position[0], v.position[1], v.position[2]]})
         shapekeys.append(sk_data)
         # Add all morph and spot vertex maps
-        for vmap in self.mesh.geometry.vmaps.morphMaps:
+        for vmap in self.geom.vmaps.morphMaps:
             relative = True if (vmap.map_type == lx.symbol.i_VMAP_MORPH) else False
             sk_data = {
                 'name': vmap.name,
                 'relative': relative,
                 'positions': []
             }
-            for v in self.mesh.geometry.vertices:
+            for v in self.vertices:
                 co = vmap.getAbsolutePosition(v.index)
-                sk_data['positions'].append({'index': v.index, 'position':[co[0], co[1], co[2]]})
+                sk_data['positions'].append({'index': self.index(v), 'position':[co[0], co[1], co[2]]})
             shapekeys.append(sk_data)
             print(f"-- morph map {vmap.name} relative {relative} map_type {vmap.map_type}")
         if len(shapekeys) == 0:
             return None
         return shapekeys
 
-    def get_selected_vertices(self):
-        selSrv = lx.service.Selection()
-        vertSelTypeCode = selSrv.LookupType(lx.symbol.sSELTYP_VERTEX)
-        vTransPacket = lx.object.VertexPacketTranslation(selSrv.Allocate(lx.symbol.sSELTYP_VERTEX))
-
-        numVerts = selSrv.Count(vertSelTypeCode)
-        vertex_ids = []
-
-        print(f"** vertices {len(self.mesh.geometry.vertices)} selcount {numVerts}")
-        for vi in range(numVerts):
-            packetPointer = selSrv.ByIndex(vertSelTypeCode, vi)
-            if not packetPointer:
-                continue
-
-            vertexID = int(vTransPacket.Vertex(packetPointer))
-            item_    = vTransPacket.Item(packetPointer)
-
-            if item_ == self.mesh.geometry._item:
-                vertex_ids[v] = vertexID
-        return tuple([modo.MeshVertex.fromId(vertexID, self.mesh.geometry) for vertexID in vertex_ids])
-
-    # Main copy function
-    def copy(self, external_clipboard='CLIPBOARD'):
-        lx.out(f'Copying to external clipboard: {external_clipboard}')
-        print("\n".join(dir(modo)))
-
-        scene = modo.Scene()
-        mesh = scene.selectedByType("mesh")
-        if not mesh:
-            return False
-
-        layer_svc = lx.service.Layer()
-        layer_scan = lx.object.LayerScan(layer_svc.ScanAllocate(lx.symbol.f_LAYERSCAN_PRIMARY | lx.symbol.f_LAYERSCAN_MARKALL))
-        if layer_scan.test() == False:
-            return False
-        
-        sel_svc = lx.service.Selection()
-        types = lx.object.storage('i', 4)
-        types.set((lx.symbol.iSEL_VERTEX, lx.symbol.iSEL_EDGE, lx.symbol.iSEL_POLYGON, 0))
-        self.selType = sel_svc.CurrentType(types)
-    
-        mesh_svc = lx.service.Mesh()
-        self.mark_select = mesh_svc.ModeCompose (lx.symbol.sMARK_SELECT, None)
-
-        self.mesh = mesh[0]
-        scene.select(self.mesh)
-
-        # store all selected mesh elements
-        self.setup_mesh_elements()
-
-        pos = self.mesh.position.get()
-        scl = self.mesh.scale.get()
-        lx.out(f'Mesh position: {pos} scale: {scl}')
-
-        locator = lx.object.Locator(self.mesh)
-        chan_read = lx.object.ChannelRead(scene.Channels(None, 0.0))
-        transforms = locator.LocalTransform(chan_read)
-
-        quat = modo.Quaternion()
-        quat.fromMatrix3(transforms[0])
-
+    # copy all materials
+    def copy_materials(self):
+        if len(self.polygons) == 0:
+            return None
         # Query Existing Materials
-        materials_out = []
-        for material in scene.items("advancedMaterial"):
+        self.materials = []
+        for material in self.scene.items("advancedMaterial"):
             mask = material.parent
             if not mask or mask.type != 'mask':
                 name = 'Default'
@@ -439,48 +389,112 @@ class ClipboardData:
                 'textures': []
             }
             lx.out(f'Found material: {name} color: {diffCol}')
-            materials_out.append(mat_data)
-
-        # vertices
+            self.materials.append(mat_data)
+        return self.materials
+    
+    # copy all selected vertices
+    def copy_vertices(self):
+        if len(self.vertices) == 0:
+            return None
         positions = []
-        for v in self.mesh.geometry.vertices:
-            accessor = v.accessor
-            print(f"vertex {v.index} select {accessor.TestMarks(self.mark_select)}")
+        for v in self.vertices:
+            print(f"vertex {self.index(v)} position {v.position}")
             positions.append([v.position[0], v.position[1], v.position[2]])
+        return positions
 
+    # copy all selected edges
+    def copy_edges(self):
+        if len(self.polygons) == 0:
+            return None
+        if len(self.edges) == 0:
+            return None
         # crease edges
-        crease_edges = [0.0] * len(self.mesh.geometry.edges)
-        for vmap in self.mesh.geometry.vmaps:
+        crease_edges = [0.0] * len(self.geom.edges)
+        for vmap in self.geom.vmaps:
             if vmap.map_type == lx.symbol.i_VMAP_SUBDIV:
                 lx.out(f'Found vmap: {vmap.name} type: {vmap.map_type} len: {len(vmap)}')
                 storageBuffer = lx.object.storage('f', 1)
-                for i, e in enumerate(self.mesh.geometry.edges):
+                for i, e in enumerate(self.geom.edges):
                     if e.MapEvaluate(vmap.id, storageBuffer) == True:
                         w = storageBuffer.get()
                         crease_edges[i] = w[0]
                 break
-
         # edges
         edges = []
-        for i, e in enumerate(self.mesh.geometry.edges):
-            edges.append({
-                'vertices': [v.index for v in e.vertices],
-                'attributes': {
-                    'crease_edge': crease_edges[i]
-                }
-            })
+        for i, e in enumerate(self.geom.edges):
+            v0, v1 = e.vertices
+            if self.selected(v0) and self.selected(v1):
+                edges.append({
+                    'vertices': [self.index(v) for v in e.vertices],
+                    'attributes': {
+                        'crease_edge': crease_edges[i]
+                    }
+                })
+        return edges
 
-        # faces
+    # copy all selected polygons
+    def copy_polygons(self):
+        if len(self.polygons) == 0:
+            return None
         polygons = []
-        for p in self.mesh.geometry.polygons:
+        for p in self.polygons:
             p_attrs = {
-                'material_index': self.get_material_index(p.materialTag, materials_out)
+                'material_index': self.get_material_index(p.materialTag, self.materials)
             }
             polygons.append({
-                'vertices': [v.index for v in p.vertices],
+                'vertices': [self.index(v) for v in p.vertices],
                 'attributes': p_attrs
             })
+        return polygons
 
+
+    # Main copy function
+    def copy(self, external_clipboard='CLIPBOARD'):
+        lx.out(f'Copying to external clipboard: {external_clipboard}')
+
+        self.scene = modo.Scene()
+        mesh = self.scene.selectedByType("mesh")
+        if not mesh:
+            return False
+
+        layer_svc = lx.service.Layer()
+        layer_scan = lx.object.LayerScan(layer_svc.ScanAllocate(lx.symbol.f_LAYERSCAN_PRIMARY | lx.symbol.f_LAYERSCAN_MARKALL))
+        if layer_scan.test() == False:
+            return False
+        
+        # get the current selection type
+        sel_svc = lx.service.Selection()
+        types = lx.object.storage('i', 4)
+        types.set((lx.symbol.iSEL_VERTEX, lx.symbol.iSEL_EDGE, lx.symbol.iSEL_POLYGON, 0))
+        self.selType = sel_svc.CurrentType(types)
+    
+        # selection mark for mesh element
+        mesh_svc = lx.service.Mesh()
+        self.mark_select = mesh_svc.ModeCompose (lx.symbol.sMARK_SELECT, None)
+
+        # setup the primary mesh
+        self.mesh = mesh[0]
+        self.geom = self.mesh.geometry
+        self.scene.select(self.mesh)
+
+        # store all selected mesh elements
+        selected = self.setup_mesh_elements()
+        if not selected:
+            self.selType = lx.symbol.iSEL_POLYGON
+
+        # mesh item transform data
+        pos = self.mesh.position.get()
+        scl = self.mesh.scale.get()
+        lx.out(f'Mesh position: {pos} scale: {scl}')
+
+        locator = lx.object.Locator(self.mesh)
+        chan_read = lx.object.ChannelRead(self.scene.Channels(None, 0.0))
+        transforms = locator.LocalTransform(chan_read)
+
+        quat = modo.Quaternion()
+        quat.fromMatrix3(transforms[0])
+
+        # mesh object data
         cobj = {
             'name': self.mesh.name,
             'type': 'MESH',
@@ -489,13 +503,28 @@ class ClipboardData:
                 'rotation_quat': [quat[0], quat[1], quat[2], quat[3]],
                 'scale': [scl[0], scl[1], scl[2]]
             },
-            'mesh': {
-                'positions': positions,
-                'edges': edges,
-                'polygons': polygons,
-                'materials': materials_out
-            }
+            'mesh': {}
         }
+
+        # Query Existing Materials
+        materials = self.copy_materials()
+        if materials:
+            cobj['mesh']['materials'] = materials
+
+        # vertices
+        positions = self.copy_vertices()
+        if positions:
+            cobj['mesh']['positions'] = positions
+
+        # edges
+        edges = self.copy_edges()
+        if edges:
+            cobj['mesh']['edges'] = edges
+
+        # polygons
+        polygons = self.copy_polygons()
+        if polygons:
+            cobj['mesh']['polygons'] = polygons
 
         # export UV maps
         uv_sets = self.extract_uv_sets()
@@ -512,6 +541,7 @@ class ClipboardData:
         if vertex_groups:
             cobj['mesh']['vertex_groups'] = vertex_groups
 
+        # CPMF data
         data = {
             'type': 'CPMF',
             'version': '1.0',
