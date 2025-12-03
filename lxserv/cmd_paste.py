@@ -31,7 +31,7 @@ class ClipboardPaste(lxu.command.BasicCommand):
         type = lx.eval("user.value clipboard.type ?")
         new_mesh = self.dyna_Int(0)
         lx.out(f"ClipboardPaste: Executing Paste to External {new_mesh}")
-        clipboard.paste_from_clipboard(external_clipboard=type, new_mesh=new_mesh)
+        clipboard.ClipboardData().paste(external_clipboard=type, new_mesh=new_mesh)
 
     def cmd_Query(self, index, vaQuery):
         lx.notimpl()
