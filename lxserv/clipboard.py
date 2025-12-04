@@ -221,7 +221,6 @@ class ClipboardData:
         for p in positions:
             v = convert_vector_from_coord(p, coord)
             v *= unit_scale
-            print(f'pos: {p} v : {v}')
             self.vertices.append(self.geom.vertices.new((v.x, v.y, v.z)))
 
     def paste_polygons(self, polygons, materials):

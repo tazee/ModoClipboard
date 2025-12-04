@@ -28,7 +28,7 @@ class ClipboardPaste(lxu.command.BasicCommand):
         pass
 
     def basic_Execute(self, msg, flags):
-        type = lx.eval("clipboard.settings type ?")
+        type = lx.eval("clipboard.settings type:?")
         new_mesh = self.dyna_Int(0)
         lx.out(f"ClipboardPaste: Executing Paste to External {new_mesh}")
         clipboard.ClipboardData().paste(external_clipboard=type, new_mesh=new_mesh)

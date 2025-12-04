@@ -36,14 +36,11 @@ class PersistData(object):
 
     def get_type(self):
         try:
-            lx.out(f"get_type: {self.type_val.GetString(0)}")
             return self.type_val.GetString(0)
         except:
-            lx.out(f"get_type: except")
             return 'tempfile'
 
     def set_type(self, type):
-        lx.out(f"set_type: {type}")
         self.type.Append()
         self.type_val.SetString(0, type)
 

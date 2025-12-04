@@ -29,8 +29,8 @@ class ClipboardCopy(lxu.command.BasicCommand):
         pass
 
     def basic_Execute(self, msg, flags):
-        lx.out("ClipboardCopy: Executing Copy to External")
         type = lx.eval("clipboard.settings type:?")
+        lx.out(f"ClipboardCopy: Executing Copy to External {type}")
         clipboard.ClipboardData().copy(external_clipboard=type)
         cut = self.dyna_Int(0)
         if cut:
