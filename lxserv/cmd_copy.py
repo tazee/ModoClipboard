@@ -2,7 +2,7 @@
 
 '''
 
-    Moddo command to copy selected mesh elements to external 
+    Modo command to copy selected mesh elements to external 
     clipboard using Python script.
 
 '''
@@ -30,7 +30,7 @@ class ClipboardCopy(lxu.command.BasicCommand):
 
     def basic_Execute(self, msg, flags):
         lx.out("ClipboardCopy: Executing Copy to External")
-        type = lx.eval("user.value clipboard.type ?")
+        type = lx.eval("clipboard.settings type:?")
         clipboard.ClipboardData().copy(external_clipboard=type)
         cut = self.dyna_Int(0)
         if cut:

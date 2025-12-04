@@ -192,7 +192,6 @@ class ClipboardData:
             if self.selected(v):
                 self.vertex_indices[v.index] = index
                 self.vertices.append(v)
-                print(f"-- store vertex {v.index} --> {self.index(v)}")
                 index += 1
 
         # store selected edges
@@ -283,6 +282,33 @@ class ClipboardData:
                 v = self.vertices[index]
                 self.setWeight(vmap, v, weight)
 
+    def paste_vertex_shapekeys(self, shapekeys):
+        coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
+        unit_scale = float(self.data.get('metadata', {}).get('unit_scale', 1.0))
+        base_positions = None
+        for shapekey in shapekeys:
+            name = shapekey.get('name')
+            if name == 'Basis':
+                base_positions = shapekey.get('positions', [])
+                continue
+            use_relative = shapekey.get('relative', True)
+            map_type = lx.symbol.i_VMAP_MORPH if use_relative else lx.symbol.i_VMAP_SPOT
+            vmap = self.lookupMap(lx.symbol.i_VMAP_WEIGHT, name)
+            if not vmap:
+                vmap = self.geom.vmaps.addMorphMap(name, (map_type is lx.symbol.i_VMAP_SPOT))
+            for pos_data in shapekey.get('positions', []):
+                index = pos_data.get('index')
+                pos = modo.Vector3(pos_data.get('position'))
+                v = self.vertices[index]
+                if use_relative:
+                    if base_positions is None:
+                        pos -= v.position
+                    else:
+                        base_data = base_positions[index]
+                        pos -= modo.Vector3(base_data.get('position'))
+                pos = convert_vector_from_coord(pos, coord)
+                pos *= unit_scale
+                self.setMorph(vmap, v, pos)
 
 
     # Main paste function
@@ -363,6 +389,10 @@ class ClipboardData:
             # paste vertex groups data to geometry
             if vertex_groups:
                 self.paste_vertex_groups(vertex_groups)
+
+            # paste vertex shapekeys data to geometry
+            if shapekeys:
+                self.paste_vertex_shapekeys(shapekeys)
 
             self.geom.setMeshEdits()
 
