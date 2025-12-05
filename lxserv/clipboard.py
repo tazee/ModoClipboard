@@ -2,6 +2,7 @@
 # External Clipboard Copy and Paste for Modo
 #
 
+from email.mime import image
 import lx
 import modo
 import logging
@@ -476,6 +477,66 @@ class ClipboardData:
         if len(shapekeys) == 0:
             return None
         return shapekeys
+    
+    # get Blender's type name from effect channel of 'imageMap' item
+    def get_effect_name(self, layer):
+        channel = layer.channel("effect")
+        if channel is None:
+            return None
+        effect = channel.get()
+        if effect == 'diffColor':
+                return 'base_color'
+        return None
+
+    # extract textures from the material
+    def extract_textures(self, material):
+        # mask item must be the parent of material
+        mask = material.parent
+        if not mask or mask.type != 'mask':
+            return None
+        textures = []
+        # iterate all child items under mask item
+        children = mask.children()
+        for layer in children:
+            # imageMap may have texture image and uv map
+            if layer.type == 'imageMap':
+                # convert Modo's effect name to Blender's one
+                effect = self.get_effect_name(layer)
+                if effect is None:
+                    continue
+                texture = {
+                    'type': effect
+                }
+                # find texture locator and videoStill item linking to the image map
+                for it in layer.itemGraph (lx.symbol.sGRAPH_SHADELOC).forward ():
+                    # Texture Locator
+                    if it.type == 'txtrLocator':
+                        # check if the projection type is 'uv'
+                        channel = it.channel("projType")
+                        if channel is None:
+                            continue
+                        projType = channel.get()
+                        if projType != 'uv':
+                            continue
+                        # get UV map name
+                        channel = it.channel("uvMap")
+                        if channel is None:
+                            continue
+                        uvmap = channel.get()
+                        texture['uv_map'] = uvmap
+                    # Video Still (image file)
+                    elif it.type == 'videoStill':
+                        channel = it.channel("filename")
+                        if channel is None:
+                            continue
+                        filename = channel.get()
+                        texture['image'] = filename
+
+                if texture['uv_map'] is not None and texture['image'] is not None:
+                    textures.append(texture)
+        if len(textures) == 0:
+            return None
+        return textures
 
     # copy all materials
     def copy_materials(self):
@@ -488,13 +549,18 @@ class ClipboardData:
             if not mask or mask.type != 'mask':
                 name = 'Default'
             else:
+                lx.out(f"material {material.name} mask {mask.name}")
                 name = mask.channel('ptag').get()
             diffCol = material.channel('diffCol').get()
+
             mat_data = {
                 'name': name,
-                'base_color': diffCol,
-                'textures': []
+                'base_color': diffCol
             }
+            # extract texture data for the material
+            textures = self.extract_textures(material)
+            if textures is not None:
+                mat_data['textures'] = textures
             lx.out(f'Found material: {name} color: {diffCol}')
             self.materials.append(mat_data)
         return self.materials
