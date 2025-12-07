@@ -154,7 +154,6 @@ class ClipboardData:
         self.edges = []
         self.polygons = []
         self.materials = []
-        self.vertex_indices = {}
         self.mark_select = None
         self.selType = None
 
@@ -184,6 +183,19 @@ class ClipboardData:
         storage.set(pos)
         v.accessor.SetMapValue(vmap.id, storage)
 
+    def setEdgePick(self, vmap):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(1)
+        self.edge_accessor.SetMapValue(vmap.id, storage)
+
+    def setSubdivWeight(self, vmap, weight):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(1)
+        storage.set([weight])
+        self.edge_accessor.SetMapValue(vmap.id, storage)
+
     def setup_mesh_elements(self):
         # store selected vertices
         self.vertex_indices = {}
@@ -205,6 +217,11 @@ class ClipboardData:
         # store selected polygons
         self.polygons.clear()
         for p in self.geom.polygons:
+            ptype = p.Type()
+            if ptype != lx.symbol.iPTYP_FACE and \
+               ptype != lx.symbol.iPTYP_SUBD and \
+               ptype != lx.symbol.iPTYP_PSUB:
+                continue
             if self.selected(p):
                 self.polygons.append(p)
 
@@ -219,7 +236,10 @@ class ClipboardData:
         coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
         unit_scale = float(self.data.get('metadata', {}).get('unit_scale', 1.0))
         self.vertices = []
-        for p in positions:
+        self.vertex_indices = []
+        n = len(self.geom.vertices)
+        for i, p in enumerate(positions):
+            self.vertex_indices.append(i + n)
             v = convert_vector_from_coord(p, coord)
             v *= unit_scale
             self.vertices.append(self.geom.vertices.new((v.x, v.y, v.z)))
@@ -240,10 +260,78 @@ class ClipboardData:
                 except Exception:
                     pass
             count += 1
+
+    def select_edge(self, vertices):
+        i0, i1 = vertices[0], vertices[1]
+        self.point_accessor.SelectByIndex(self.vertex_indices[i0])
+        id0 = self.point_accessor.ID()
+        self.point_accessor.SelectByIndex(self.vertex_indices[i1])
+        id1 = self.point_accessor.ID()
+        print(f"select_edge: [{i0} {i1}] vertices {vertices} id0 {id0} id1 {id1}")
+        self.edge_accessor.SelectEndpoints(id0, id1)
     
     def paste_edges(self, edges):
+        vmap = self.lookupMap(lx.symbol.i_VMAP_SUBDIV, "Subdivision")
+        print(f"paste_edges: vmap {vmap} edges {len(self.geom.edges)}")
+        if vmap is None:
+            return
         for e in edges:
-            v0, v1 = e.get('vertices', [])
+            self.select_edge(e.get('vertices', []))
+            weight = e.get('attributes', {}).get('crease_edge', 0.0)
+            if weight > 0.0 and vmap is not None:
+                self.setSubdivWeight(vmap, weight)
+
+
+    def get_type_name(self, type):
+        if type == 'base_color':
+            return 'diffColor'
+        return None
+
+    def paste_textures(self, material, mask):
+        base_dir = self.data.get('metadata', {}).get('custom', {}).get('base_dir', None)
+        for tex in material.get('textures', []):
+            effect = self.get_type_name(tex.get('type', ''))
+            if not effect:
+                continue
+            img_path = tex.get('image')
+            uv_map_name = tex.get('uv_map') or ''
+            if not img_path:
+                continue
+            if base_dir and not os.path.isabs(img_path):
+                candidate = os.path.join(base_dir, img_path)
+                if os.path.exists(candidate):
+                    img_path = candidate
+            name = os.path.basename(img_path)
+            #print(f"image_path {img_path} name {name}")
+            layer = self.scene.addItem('imageMap')
+            layer.SetName(name)
+            layer.channel('effect').set(effect)
+            layer.setParent(mask, index=1)
+            graph = layer.itemGraph(lx.symbol.sGRAPH_SHADELOC)
+            #print(f"-- add imageMap layer {layer.name}")
+            item_image = None
+            item_txtrLocator = None
+            for it in graph.forward():
+                #print(f"linked item {it.name} type {it.type}")
+                if it.type == 'videoStill':
+                    it.channel('filename').set(img_path)
+                    item_image = it
+                elif it.type == 'txtrLocator':
+                    it.channel('projType').set('uv')
+                    if uv_map_name:
+                        it.channel('uvMap').set(uv_map_name)
+                    item_txtrLocator = it
+            if item_image is None:
+                item = self.scene.addItem('videoStill')
+                graph.AddLink(layer, item)
+                item.channel('filename').set(img_path)
+            if item_txtrLocator is None:
+                item = self.scene.addItem('txtrLocator')
+                graph.AddLink(layer, item)
+                item.channel('projType').set('uv')
+                if uv_map_name:
+                    item.channel('uvMap').set(uv_map_name)
+                
 
     def paste_materials(self, materials):
         for material in materials:
@@ -254,6 +342,8 @@ class ClipboardData:
             mask = self.scene.addItem('mask', name=name)
             mask.channel('ptag').set(name)
             mat.setParent(mask, index=1)
+            self.paste_textures(material, mask)
+
 
     def paste_uv_sets(self, uv_sets):
         for uv_set in uv_sets:
@@ -310,6 +400,17 @@ class ClipboardData:
                 pos *= unit_scale
                 self.setMorph(vmap, v, pos)
 
+    def paste_edge_freestyle(self, freestyle_edges):
+        name = '_Freestyle'
+        vmap = self.lookupMap(lx.symbol.i_VMAP_EPCK, name)
+        if not vmap:
+            vmap = self.geom.vmaps.addMap(lx.symbol.i_VMAP_EPCK, name)
+        for data in freestyle_edges:
+            vertices = data.get('vertices')
+            use_freestyle_mark = data.get('use_freestyle_mark', 0)
+            if use_freestyle_mark:
+                self.select_edge(vertices)
+                self.setEdgePick(vmap)
 
     # Main paste function
     def paste(self, external_clipboard='CLIPBOARD', new_mesh=False):
@@ -346,11 +447,14 @@ class ClipboardData:
             mesh_data = obj_data.get('mesh', {})
             positions = mesh_data.get('positions', [])
             edges = mesh_data.get('edges', [])
+            #edges = None
             polygons = mesh_data.get('polygons', [])
             materials = mesh_data.get('materials', []) or mesh_data.get('mesh', {}).get('materials', []) or mesh_data.get('materials', [])
             uv_sets = mesh_data.get('uv_sets', [])
             shapekeys = mesh_data.get('shapekeys', [])
             vertex_groups = mesh_data.get('vertex_groups', [])
+            #freestyle_edges = None
+            freestyle_edges = mesh_data.get('freestyle_edges', [])
 
             if new_mesh == True:
                 mesh = self.scene.addMesh("Mesh")
@@ -365,6 +469,8 @@ class ClipboardData:
 
             self.mesh = mesh
             self.geom = mesh.geometry
+            self.geom.setAccessMode(value='write')
+            print(f"** geometry access mode {self.geom.accessMode} **")
         
             # paste positions to geometry and apply unit scale
             if positions:
@@ -373,10 +479,6 @@ class ClipboardData:
             # paste polygons data to geometry
             if polygons:
                 self.paste_polygons(polygons, materials)
-
-            # paste edges data to geometry
-            if edges:
-                self.paste_edges(edges)
 
             # paste materials data to geometry
             if materials:
@@ -396,9 +498,38 @@ class ClipboardData:
 
             self.geom.setMeshEdits()
 
+            # Apply edge vertex map values using layer scan since ModoGeometry 
+            # does not work for writing edge vmaps
+            layer_svc = lx.service.Layer()
+            layer_scan = lx.object.LayerScan(layer_svc.ScanAllocate(lx.symbol.f_LAYERSCAN_EDIT))
+            if layer_scan.test() == False:
+                return
+
+            mesh = lx.object.Mesh (layer_scan.MeshEdit (0))
+            self.edge_accessor = lx.object.Edge (mesh.EdgeAccessor ())
+            self.point_accessor = lx.object.Point (mesh.PointAccessor ())
+
+            # paste edges data to geometry
+            if edges:
+                self.paste_edges(edges)
+
+            # paste freestyle data to geometry as EdgePick map
+            if freestyle_edges:
+                self.paste_edge_freestyle(freestyle_edges)
+
+            layer_scan.SetMeshChange(0, lx.symbol.f_MESHEDIT_MAP_OTHER)
+            layer_scan.Apply()
+
+
     def get_material_index(self, name, material_out):
         for i, mat in enumerate(material_out):
             if mat['name'] == name:
+                return i
+        return 0
+          
+    def get_edge_index(self, edge):
+        for i, e in enumerate(self.edges):
+            if e == edge:
                 return i
         return 0
 
@@ -441,7 +572,6 @@ class ClipboardData:
                 if w is not None:
                     vg_data['weights'].append({'index': self.index(v), 'weight': w[0]})
             vertex_groups.append(vg_data)
-            print(f"-- weight map {vmap.name} size {len(vertex_groups)}")
         if len(vertex_groups) == 0:
             return None
         return vertex_groups
@@ -473,10 +603,26 @@ class ClipboardData:
                 co = vmap.getAbsolutePosition(v.index)
                 sk_data['positions'].append({'index': self.index(v), 'position':[co[0], co[1], co[2]]})
             shapekeys.append(sk_data)
-            print(f"-- morph map {vmap.name} relative {relative} map_type {vmap.map_type}")
         if len(shapekeys) == 0:
             return None
         return shapekeys
+
+    def extract_edge_freestyle(self):
+        if len(self.edges) == 0:
+            return None
+        freestyle_edges = []
+        for vmap in self.geom.vmaps:
+            if vmap.map_type != lx.symbol.i_VMAP_EPCK:
+                continue
+            if vmap.name != '_Freestyle':
+                continue
+            for e in self.edges:
+                storageBuffer = lx.object.storage('f', 1)
+                if e.MapEvaluate(vmap.id, storageBuffer) == True:
+                    freestyle_edges.append({'vertices': [self.index(v) for v in e.vertices], 'use_freestyle_mark': 1})
+        if len(freestyle_edges) == 0:
+            return None
+        return freestyle_edges
     
     # get Blender's type name from effect channel of 'imageMap' item
     def get_effect_name(self, layer):
@@ -713,6 +859,11 @@ class ClipboardData:
         vertex_groups = self.extract_vertex_groups()
         if vertex_groups:
             cobj['mesh']['vertex_groups'] = vertex_groups
+
+        # export freestyle edges
+        freestyle_edges = self.extract_edge_freestyle()
+        if freestyle_edges:
+            cobj['mesh']['freestyle_edges'] = freestyle_edges
 
         # CPMF data
         data = {
