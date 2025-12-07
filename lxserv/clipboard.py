@@ -427,7 +427,7 @@ class ClipboardData:
         #print(f'Pasting from external clipboard: {external_clipboard}, new_mesh={new_mesh}')
         if external_clipboard == 'tempfile':
             path = get_cpmf_tempfile_path()
-            #print(f'Read file from: {path}')
+            lx.out(f'Read file from: {path}')
             if not path:
                 lx.out({'ERROR'}, 'No file path specified for import')
                 return False
