@@ -1,5 +1,7 @@
 #
-# External Clipboard Copy and Paste for Modo
+# External Clipboard to exchange CPMF data between Modo and Blender
+#
+# CPMF: Custom Portable Mesh Format
 #
 
 from email.mime import image
@@ -156,6 +158,7 @@ class ClipboardData:
         self.materials = []
         self.mark_select = None
         self.selType = None
+        self.base_nvert = 0
 
     def selected(self, v):
         return v.accessor.TestMarks(self.mark_select)
@@ -236,10 +239,8 @@ class ClipboardData:
         coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
         unit_scale = float(self.data.get('metadata', {}).get('unit_scale', 1.0))
         self.vertices = []
-        self.vertex_indices = []
-        n = len(self.geom.vertices)
+        self.base_nvert = len(self.geom.vertices)
         for i, p in enumerate(positions):
-            self.vertex_indices.append(i + n)
             v = convert_vector_from_coord(p, coord)
             v *= unit_scale
             self.vertices.append(self.geom.vertices.new((v.x, v.y, v.z)))
@@ -263,20 +264,28 @@ class ClipboardData:
 
     def select_edge(self, vertices):
         i0, i1 = vertices[0], vertices[1]
-        self.point_accessor.SelectByIndex(self.vertex_indices[i0])
+        i0 += self.base_nvert
+        i1 += self.base_nvert
+        if i0 >= self.mesh.PointCount() or i1 >= self.mesh.PointCount():
+            return False
+        self.point_accessor.SelectByIndex(i0)
         id0 = self.point_accessor.ID()
-        self.point_accessor.SelectByIndex(self.vertex_indices[i1])
+        self.point_accessor.SelectByIndex(i1)
         id1 = self.point_accessor.ID()
-        print(f"select_edge: [{i0} {i1}] vertices {vertices} id0 {id0} id1 {id1}")
+        #print(f"select_edge: [{i0} {i1}] vertices {vertices} id0 {id0} id1 {id1}")
+        if id0 is None or id1 is None:
+            return False
         self.edge_accessor.SelectEndpoints(id0, id1)
+        return True
     
     def paste_edges(self, edges):
         vmap = self.lookupMap(lx.symbol.i_VMAP_SUBDIV, "Subdivision")
-        print(f"paste_edges: vmap {vmap} edges {len(self.geom.edges)}")
+        #print(f"paste_edges: vmap {vmap} edges {len(self.geom.edges)}")
         if vmap is None:
             return
         for e in edges:
-            self.select_edge(e.get('vertices', []))
+            if self.select_edge(e.get('vertices', [])) == False:
+                continue
             weight = e.get('attributes', {}).get('crease_edge', 0.0)
             if weight > 0.0 and vmap is not None:
                 self.setSubdivWeight(vmap, weight)
@@ -409,15 +418,16 @@ class ClipboardData:
             vertices = data.get('vertices')
             use_freestyle_mark = data.get('use_freestyle_mark', 0)
             if use_freestyle_mark:
-                self.select_edge(vertices)
+                if self.select_edge(vertices) == False:
+                    continue
                 self.setEdgePick(vmap)
 
     # Main paste function
-    def paste(self, external_clipboard='CLIPBOARD', new_mesh=False):
-        print(f'Pasting from external clipboard: {external_clipboard}, new_mesh={new_mesh}')
-        if external_clipboard == 'TEMPFILE':
+    def paste(self, external_clipboard='tempfile', new_mesh=False):
+        #print(f'Pasting from external clipboard: {external_clipboard}, new_mesh={new_mesh}')
+        if external_clipboard == 'tempfile':
             path = get_cpmf_tempfile_path()
-            print(f'Read file from: {path}')
+            #print(f'Read file from: {path}')
             if not path:
                 lx.out({'ERROR'}, 'No file path specified for import')
                 return False
@@ -447,17 +457,16 @@ class ClipboardData:
             mesh_data = obj_data.get('mesh', {})
             positions = mesh_data.get('positions', [])
             edges = mesh_data.get('edges', [])
-            #edges = None
             polygons = mesh_data.get('polygons', [])
             materials = mesh_data.get('materials', []) or mesh_data.get('mesh', {}).get('materials', []) or mesh_data.get('materials', [])
             uv_sets = mesh_data.get('uv_sets', [])
             shapekeys = mesh_data.get('shapekeys', [])
             vertex_groups = mesh_data.get('vertex_groups', [])
-            #freestyle_edges = None
             freestyle_edges = mesh_data.get('freestyle_edges', [])
 
             if new_mesh == True:
                 mesh = self.scene.addMesh("Mesh")
+                self.scene.select(mesh)
             else:
                 mesh = self.scene.selectedByType("mesh")
                 if mesh:
@@ -470,7 +479,6 @@ class ClipboardData:
             self.mesh = mesh
             self.geom = mesh.geometry
             self.geom.setAccessMode(value='write')
-            print(f"** geometry access mode {self.geom.accessMode} **")
         
             # paste positions to geometry and apply unit scale
             if positions:
@@ -505,9 +513,9 @@ class ClipboardData:
             if layer_scan.test() == False:
                 return
 
-            mesh = lx.object.Mesh (layer_scan.MeshEdit (0))
-            self.edge_accessor = lx.object.Edge (mesh.EdgeAccessor ())
-            self.point_accessor = lx.object.Point (mesh.PointAccessor ())
+            self.mesh = lx.object.Mesh (layer_scan.MeshEdit (0))
+            self.edge_accessor = lx.object.Edge (self.mesh.EdgeAccessor ())
+            self.point_accessor = lx.object.Point (self.mesh.PointAccessor ())
 
             # paste edges data to geometry
             if edges:
@@ -717,7 +725,6 @@ class ClipboardData:
             return None
         positions = []
         for v in self.vertices:
-            print(f"vertex {self.index(v)} position {v.position}")
             positions.append([v.position[0], v.position[1], v.position[2]])
         return positions
 
@@ -768,7 +775,7 @@ class ClipboardData:
 
 
     # Main copy function
-    def copy(self, external_clipboard='CLIPBOARD'):
+    def copy(self, external_clipboard='tempfile'):
         lx.out(f'Copying to external clipboard: {external_clipboard}')
 
         self.scene = modo.Scene()
@@ -886,7 +893,7 @@ class ClipboardData:
             return False
 
         # File
-        if external_clipboard == 'TEMPFILE':
+        if external_clipboard == 'tempfile':
             try:
                 path = get_cpmf_tempfile_path()
                 lx.out(f'Temporary file created at: {path}')
