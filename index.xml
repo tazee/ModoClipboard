@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package version="1610">
+	<kit name="ModoClipboard" restart="YES">
+		<source target="ModoClipboard/index.html">index.html</source>
+		<source target="ModoClipboard/index.cfg">index.cfg</source>
+		<source target="ModoClipboard/LICENSE">LICENSE</source>
+		<source target="ModoClipboard/README.md">README.md</source>
+		<source target="ModoClipboard/icons.cfg">icons.cfg</source>
+		<source target="ModoClipboard/lxserv/cmd_copy.py">lxserv/cmd_copy.py</source>
+		<source target="ModoClipboard/lxserv/cmd_paste.py">lxserv/cmd_paste.py</source>
+		<source target="ModoClipboard/lxserv/clipboard.py">lxserv/clipboard.py</source>
+		<source target="ModoClipboard/lxserv/cmd_settings.py">lxserv/cmd_settings.py</source>
+		<source target="ModoClipboard/images/icons_32.png">images/icons_32.png</source>
+		<source target="ModoClipboard/images/UI.png">images/UI.png</source>
+		<source target="ModoClipboard/images/clipboard_1024.png">images/clipboard_1024.png</source>
+		<source target="ModoClipboard/images/icons_20.png">images/icons_20.png</source>
+	</kit>
+	<message button="Help">ModoClipboard Kit installation complete.</message>
+</package>

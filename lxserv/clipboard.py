@@ -641,17 +641,23 @@ class ClipboardData:
         if effect == 'diffColor':
                 return 'base_color'
         return None
+    
+    def get_imageMap_items(self):
+        return [item for item in self.scene.items() if item.type == 'imageMap']
 
     # extract textures from the material
     def extract_textures(self, material):
         # mask item must be the parent of material
         mask = material.parent
-        if not mask or mask.type != 'mask':
-            return None
         textures = []
         # iterate all child items under mask item
-        children = mask.children()
-        for layer in children:
+        if not mask:
+            layers = self.get_imageMap_items()
+        else:
+            layers = mask.children()
+        if not layers:
+            return None
+        for layer in layers:
             # imageMap may have texture image and uv map
             if layer.type == 'imageMap':
                 # convert Modo's effect name to Blender's one
