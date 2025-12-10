@@ -31,10 +31,6 @@ UV maps is output as Blender UV Set data.
 **Freestyle edge**<br>
 Import Freestyle edges from Blender into edge selection set vmap named "_Freestyle". If an edge selection set named "_Freestyle" is in the current mesh, it will be output as Freestyle data.
 
-**Vertex Color Map**<br>
-RGB, RGBA maps is output as Blender vertex color data.
-
-
 ## Installing
 - Download lpk from releases. Drag and drop into your Modo viewport. If you're upgrading, delete previous version.
 
