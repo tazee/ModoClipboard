@@ -354,6 +354,14 @@ class ClipboardData:
             if self.selected(p):
                 self.polygon_ids.append(p.ID())
 
+        if self.selType == lx.symbol.iSEL_VERTEX:
+            return True if len(self.vertex_ids) > 0 else False
+        elif self.selType == lx.symbol.iSEL_EDGE:
+            return True if len(self.edge_ids) > 0 else False
+        else:
+            return True if len(self.polygon_ids) > 0 else False
+
+    def setup_vmap_ids(self):
         # store all vertex maps
         class QueryMapsVisitor(lxifc.Visitor):
             def __init__(self, meshmap, vmap_ids):
@@ -392,13 +400,6 @@ class ClipboardData:
                 self.vmap_color_ids.append(vmap_id)
             else:
                 continue
-
-        if self.selType == lx.symbol.iSEL_VERTEX:
-            return True if len(self.vertex_ids) > 0 else False
-        elif self.selType == lx.symbol.iSEL_EDGE:
-            return True if len(self.edge_ids) > 0 else False
-        else:
-            return True if len(self.polygon_ids) > 0 else False
 
     def paste_vertices(self, positions):
         coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
@@ -664,6 +665,9 @@ class ClipboardData:
             self.point_accessor = lx.object.Point (self.mesh.PointAccessor ())
             self.polygon_accessor = lx.object.Polygon (self.mesh.PolygonAccessor ())
             self.map_accessor = lx.object.MeshMap (self.mesh.MeshMapAccessor ())
+
+        # store all vertex maps
+            self.setup_vmap_ids()
         
             # paste positions to geometry and apply unit scale
             if positions:
@@ -800,7 +804,7 @@ class ClipboardData:
             for point_id in self.vertex_ids:
                 v = self.Point(point_id)
                 w = self.getWeight(vmap, v)
-                if w is not None:
+                if w is not None and w[0] != 0.0:
                     vg_data['weights'].append({'index': self.index(v), 'weight': w[0]})
             vertex_groups.append(vg_data)
         if len(vertex_groups) == 0:
@@ -960,6 +964,8 @@ class ClipboardData:
                 mat_data['textures'] = textures
             lx.out(f'Found material: {name} color: {diffCol}')
             self.materials.append(mat_data)
+        if len(self.materials) == 0:
+            return None
         return self.materials
     
     # copy all selected vertices
@@ -971,6 +977,8 @@ class ClipboardData:
             v = self.Point(id)
             pos = v.Pos()
             positions.append([pos[0], pos[1], pos[2]])
+        if len(positions) == 0:
+            return None
         return positions
 
     # copy all selected edges
@@ -996,6 +1004,8 @@ class ClipboardData:
         edges = []
         for i in range(self.mesh.EdgeCount()):
             e = self.EdgeByIndex(i)
+            if crease_edges[i] == 0.0:
+                continue
             id0, id1 = e.Endpoints()
             if self.selected_point(id0) and self.selected_point(id1):
                 edges.append({
@@ -1004,6 +1014,8 @@ class ClipboardData:
                         'crease_edge': crease_edges[i]
                     }
                 })
+        if len(edges) == 0:
+            return None
         return edges
 
     # copy all selected polygons
@@ -1024,6 +1036,8 @@ class ClipboardData:
                 'vertices': vertices,
                 'attributes': p_attrs
             })
+        if len(polygons) == 0:
+            return None
         return polygons
 
 
@@ -1068,6 +1082,9 @@ class ClipboardData:
         selected = self.setup_mesh_elements()
         if not selected:
             self.selType = lx.symbol.iSEL_POLYGON
+
+        # store all vertex maps
+        self.setup_vmap_ids()
 
         # mesh object data
         cobj = {
