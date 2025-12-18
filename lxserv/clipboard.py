@@ -98,9 +98,9 @@ def read_tempfile(path):
 #
 # Modo (Y-Up) -> Blender (Z-Up)
 M2B = modo.Matrix3((
-    (1.0, 0.0,  0.0),
-    (0.0, 0.0, -1.0),
-    (0.0, 1.0,  0.0),
+    (1.0, 0.0,  0.0), # x_rh
+    (0.0, 0.0, -1.0), # z_rh
+    (0.0, 1.0,  0.0), #-y_rh
 ))
 
 # Blender (Z-Up) -> Modo (Y-Up)
@@ -109,6 +109,14 @@ B2M= modo.Matrix3((
     (0.0, 0.0,  1.0),
     (0.0, -1.0, 0.0),
 ))
+
+# Modo (Y-Up, Right Hand) -> LightWave (Y-Up, Left Hand)
+M2L = modo.Matrix3((
+    (1.0, 0.0,  0.0), # x_rh
+    (0.0, 1.0,  0.0), # y_rh
+    (0.0, 0.0, -1.0), #-z_rh
+))
+L2M = M2L.inverted()
 
 def mat3_mul_vec3(M, v):
     """
@@ -133,22 +141,29 @@ def convert_vector_from_coord(vec, src_coord):
     v = modo.Vector3(vec)
 
     # Blender → Modo
-    if "z_up" in key:
+    if "z_up_rh" in key:
         return mat3_mul_vec3(B2M, v)
+    elif "y_up_lh" in key:
+        return mat3_mul_vec3(L2M, v)
 
     # Already Modo space
     return v
 
 # --- Quaternion conversion ---
 def convert_quaternion_from_coord(q_in, src_coord):
-    if not src_coord or "z_up" not in src_coord.lower():
+    if not src_coord or "y_up_rh" in src_coord.lower():
         return modo.Quaternion((q_in[0], q_in[1], q_in[2], q_in[3]))
 
     # Quaternion → Matrix
     Rb = modo.Quaternion((q_in[0], q_in[1], q_in[2], q_in[3])).toMatrix3()
 
     # Blender rotation → Modo rotation
-    Rm = B2M * Rb * M2B
+    if "z_up_rh" in src_coord.lower():
+        Rm = B2M * Rb * M2B
+    elif "y_up_lh" in src_coord.lower():
+        Rm = L2M * Rb * L2B
+    else:
+        return modo.Quaternion((q_in[0], q_in[1], q_in[2], q_in[3]))
 
     # Matrix → Quaternion
     return modo.Quaternion.fromMatrix3(Rm)
@@ -782,7 +797,7 @@ class ClipboardData:
             self.polygon_accessor = lx.object.Polygon (self.mesh.PolygonAccessor ())
             self.map_accessor = lx.object.MeshMap (self.mesh.MeshMapAccessor ())
 
-        # store all vertex maps
+            # store all vertex maps
             self.setup_vmap_ids()
         
             # paste positions to geometry and apply unit scale
