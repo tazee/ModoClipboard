@@ -1,8 +1,21 @@
-#
-# External Clipboard to exchange CPMF data between Modo and Blender
-#
-# CPMF: Custom Portable Mesh Format
-#
+'''
+External Clipboard to exchange CPMF data between Modo and Blender
+
+Copyright (C) 2025 Yoshiaki Tazaki All Rights Reserved
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+'''
 
 import lx
 import lxu
@@ -16,6 +29,7 @@ from datetime import datetime
 import os
 import tempfile
 
+i_VMAP_SEAM = 1397047629
 
 # ---------- Clipboard helpers ----------
 try:
@@ -178,7 +192,18 @@ class ClipboardData:
     def lookupMap(self, map_type, name):
         for vmap_id in self.vmap_ids:
             vmap = self.VMap(vmap_id)
-            if vmap.Type() == map_type and vmap.Name() == name:
+            try:
+                vmap_name = vmap.Name()
+            except:
+                continue
+            if vmap.Type() == map_type and vmap_name == name:
+                return vmap
+        return None
+    
+    def lookupMapAny(self, map_type):
+        for vmap_id in self.vmap_ids:
+            vmap = self.VMap(vmap_id)
+            if vmap.Type() == map_type:
                 return vmap
         return None
 
@@ -208,6 +233,22 @@ class ClipboardData:
         if v.MapValue(vmap.ID(), storage) == False:
             return None
         return storage.get()
+
+    def getPick(self, vmap, v):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(1)
+        if v.MapValue(vmap.ID(), storage) == False:
+            return False
+        return True
+
+    def getEdgePick(self, vmap, e):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(1)
+        if e.MapValue(vmap.ID(), storage) == False:
+            return False
+        return True
 
     def getUV(self, vmap, p, point_id):
         storage = lx.object.storage()
@@ -262,18 +303,31 @@ class ClipboardData:
         storage.set(uv)
         p.SetMapValue(point_id, vmap.ID(), storage)
 
-    def setColor(self, vmap, p, point_id, color):
+    def setCornerColor(self, vmap, p, point_id, color):
         storage = lx.object.storage()
         storage.setType('f')
         storage.setSize(4)
         storage.set(color)
         p.SetMapValue(point_id, vmap.ID(), storage)
 
+    def setPointColor(self, vmap, v, color):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(4)
+        storage.set(color)
+        v.SetMapValue(vmap.ID(), storage)
+
     def setEdgePick(self, vmap, e):
         storage = lx.object.storage()
         storage.setType('f')
         storage.setSize(1)
         e.SetMapValue(vmap.ID(), storage)
+
+    def setVertexPick(self, vmap, v):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(1)
+        v.SetMapValue(vmap.ID(), storage)
 
     def setSubdivWeight(self, vmap, e, weight):
         storage = lx.object.storage()
@@ -316,11 +370,27 @@ class ClipboardData:
 
     def MaterialTag(self, p):
         loc = lx.object.StringTag(p)
-        return loc.Get(lx.symbol.i_POLYTAG_MATERIAL)
+        try:
+            tag = loc.Get(lx.symbol.i_POLYTAG_MATERIAL)
+        except:
+            tag = None
+        return tag
 
     def setMaterialTag(self, p, tag):
         loc = lx.object.StringTag(p)
         return loc.Set(lx.symbol.i_POLYTAG_MATERIAL, tag)
+
+    def PickTag(self, p):
+        loc = lx.object.StringTag(p)
+        try:
+            tag = loc.Get(lx.symbol.i_POLYTAG_PICK)
+        except:
+            tag = None
+        return tag
+
+    def setPickTag(self, p, tag):
+        loc = lx.object.StringTag(p)
+        return loc.Set(lx.symbol.i_POLYTAG_PICK, tag)
 
     def setup_mesh_elements(self):
         # store selected vertices
@@ -440,17 +510,27 @@ class ClipboardData:
         return self.edge_accessor
     
     def paste_edges(self, edges):
+        # Subdivision map
         vmap = self.lookupMap(lx.symbol.i_VMAP_SUBDIV, "Subdivision")
-        if vmap is None:
-            return
+        if vmap != None:
+            for edge in edges:
+                e = self.select_edge(edge.get('vertices', []))
+                if e is None:
+                    continue
+                weight = edge.get('attributes', {}).get('crease_edge', 0.0)
+                if weight > 0.0:
+                    self.setSubdivWeight(vmap, e, weight)
+        # UV Seam map
+        vmap = self.lookupMap(i_VMAP_SEAM, "_Seam")
         for edge in edges:
             e = self.select_edge(edge.get('vertices', []))
             if e is None:
                 continue
-            weight = edge.get('attributes', {}).get('crease_edge', 0.0)
-            if weight > 0.0 and vmap is not None:
-                self.setSubdivWeight(vmap, e, weight)
-
+            seam = edge.get('attributes', {}).get('seam', False)
+            if seam is True:
+                if vmap is None:
+                    vmap = self.addMap(i_VMAP_SEAM, "_Seam")
+                self.setEdgePick(vmap, e)
 
     def get_type_name(self, type):
         if type == 'base_color':
@@ -535,18 +615,27 @@ class ClipboardData:
     def paste_colors(self, colors):
         for color in colors:
             name = color.get('name', '')
+            domain = color.get('domain', '')
             vmap = self.lookupMap(lx.symbol.i_VMAP_RGBA, name)
             if not vmap:
                 vmap = self.addMap(lx.symbol.i_VMAP_RGBA, name)
-            for face_color in color.get('color', []):
-                index = face_color.get('index')
-                values = face_color.get('values', [])
-                poly_id = self.polygon_ids[index]
-                p = self.Polygon(poly_id)
-                for i in range(p.VertexCount()):
-                    point_id = p.VertexByIndex(i)
-                    color = values[i]
-                    self.setColor(vmap, p, point_id, color)
+            if domain == 'CORNER':
+                for face_color in color.get('colors', []):
+                    index = face_color.get('index')
+                    values = face_color.get('values', [])
+                    poly_id = self.polygon_ids[index]
+                    p = self.Polygon(poly_id)
+                    for i in range(p.VertexCount()):
+                        point_id = p.VertexByIndex(i)
+                        color = values[i]
+                        self.setCornerColor(vmap, p, point_id, color)
+            elif domain == 'POINT':
+                for point_color in color.get('colors', []):
+                    index = point_color.get('index')
+                    color = point_color.get('values', [])
+                    point_id = self.vertex_ids[index]
+                    v = self.Point(point_id)
+                    self.setPointColor(vmap, v, color)
 
     def paste_vertex_groups(self, vertex_groups):
         for vertex_group in vertex_groups:
@@ -607,6 +696,32 @@ class ClipboardData:
                     continue
                 self.setEdgePick(vmap, e)
 
+    def paste_selection_sets(self, selection_sets):
+        for data in selection_sets:
+            name = data.get('name')
+            type = data.get('type')
+            indices = data.get('indices')
+            if type == 'VERT':
+                vmap = self.lookupMap(lx.symbol.i_VMAP_PICK, name)
+                if not vmap:
+                    vmap = self.addMap(lx.symbol.i_VMAP_PICK, name)
+                for index in indices:
+                    v = self.Point(self.vertex_ids[index])
+                    self.setVertexPick(vmap, v)
+            elif type == 'EDGE':
+                vmap = self.lookupMap(lx.symbol.i_VMAP_EPCK, name)
+                if not vmap:
+                    vmap = self.addMap(lx.symbol.i_VMAP_EPCK, name)
+                for vertices in indices:
+                    e = self.select_edge(vertices)
+                    if e is None:
+                        continue
+                    self.setEdgePick(vmap, e)
+            elif type == 'FACE':
+                for index in indices:
+                    p = self.Polygon(self.polygon_ids[index])
+                    self.setPickTag(p, name)
+
     # Main paste function
     def paste(self, external_clipboard='tempfile', new_mesh=False):
         #print(f'Pasting from external clipboard: {external_clipboard}, new_mesh={new_mesh}')
@@ -649,6 +764,7 @@ class ClipboardData:
             vertex_groups = mesh_data.get('vertex_groups', [])
             freestyle_edges = mesh_data.get('freestyle_edges', [])
             colors = mesh_data.get('colors', [])
+            selection_sets = mesh_data.get('selection_sets', [])
 
             if new_mesh == True:
                 mesh = self.scene.addMesh("Mesh")
@@ -723,7 +839,11 @@ class ClipboardData:
             if freestyle_edges:
                 self.paste_edge_freestyle(freestyle_edges)
 
-            scan2.SetMeshChange(0, lx.symbol.f_MESHEDIT_MAP_OTHER)
+            # paste selection sets
+            if selection_sets:
+                self.paste_selection_sets(selection_sets)
+
+            scan2.SetMeshChange(0, lx.symbol.f_MESHEDIT_MAP_OTHER|lx.symbol.f_MESHEDIT_POL_TAGS)
             scan2.Apply()
 
 
@@ -743,17 +863,32 @@ class ClipboardData:
                 'name': vmap.Name(),
                 'uvs': []
             }
-            for i, poly_id in enumerate(self.polygon_ids):
-                face_uvs = {
-                    'index': i,
-                    'values': []
-                }
+            i = 0
+            for poly_id in self.polygon_ids:
                 p = self.Polygon(poly_id)
-                for j in range(p.VertexCount()):
-                    point_id = p.VertexByIndex(j)
-                    uv = self.getUV(vmap, p, point_id)
-                    face_uvs['values'].append([uv[0], uv[1]])
-                uv_set['uvs'].append(face_uvs)
+                if self.is_keyhole(p):
+                    count = p.GenerateTriangles()
+                    for j in range(count):
+                        face_uvs = {
+                            'index': i,
+                            'values': []
+                        }
+                        i += 1
+                        for point_id in p.TriangleByIndex(j):
+                            uv = self.getUV(vmap, p, point_id)
+                            face_uvs['values'].append([uv[0], uv[1]])
+                        uv_set['uvs'].append(face_uvs)
+                else:
+                    face_uvs = {
+                        'index': i,
+                        'values': []
+                    }
+                    i += 1
+                    for j in range(p.VertexCount()):
+                        point_id = p.VertexByIndex(j)
+                        uv = self.getUV(vmap, p, point_id)
+                        face_uvs['values'].append([uv[0], uv[1]])
+                    uv_set['uvs'].append(face_uvs)
             uv_sets.append(uv_set)
         if len(uv_sets) == 0:
             return None
@@ -767,25 +902,48 @@ class ClipboardData:
             vmap = self.VMap(vmap_id)
             color = {
                 'name': vmap.Name(),
-                'color': []
+                'domain': 'CORNER',
+                'data_type': 'FLOAT_COLOR',
+                'colors': []
             }
-            for i, poly_id in enumerate(self.polygon_ids):
-                face_color = {
-                    'index': i,
-                    'values': []
-                }
+            i = 0
+            for poly_id in self.polygon_ids:
                 p = self.Polygon(poly_id)
-                n = 0
-                for j in range(p.VertexCount()):
-                    point_id = p.VertexByIndex(j)
-                    rgba = self.getColor(vmap, p, point_id)
-                    if rgba is None:
-                        face_color['values'].append([0.0, 0.0, 0.0, 0.0])
-                    else:
-                        face_color['values'].append([rgba[0], rgba[1], rgba[2], rgba[3]])
-                        n += 1
-                if n > 0:
-                    color['color'].append(face_color)
+                if self.is_keyhole(p):
+                    count = p.GenerateTriangles()
+                    for j in range(count):
+                        face_color = {
+                            'index': i,
+                            'values': []
+                        }
+                        i += 1
+                        n = 0
+                        for point_id in p.TriangleByIndex(j):
+                            rgba = self.getColor(vmap, p, point_id)
+                            if rgba is None:
+                                face_color['values'].append([0.0, 0.0, 0.0, 0.0])
+                            else:
+                                face_color['values'].append([rgba[0], rgba[1], rgba[2], rgba[3]])
+                                n += 1
+                        if n > 0:
+                            color['colors'].append(face_color)
+                else:
+                    face_color = {
+                        'index': i,
+                        'values': []
+                    }
+                    i += 1
+                    n = 0
+                    for j in range(p.VertexCount()):
+                        point_id = p.VertexByIndex(j)
+                        rgba = self.getColor(vmap, p, point_id)
+                        if rgba is None:
+                            face_color['values'].append([0.0, 0.0, 0.0, 0.0])
+                        else:
+                            face_color['values'].append([rgba[0], rgba[1], rgba[2], rgba[3]])
+                            n += 1
+                    if n > 0:
+                        color['colors'].append(face_color)
             colors.append(color)
         if len(colors) == 0:
             return None
@@ -872,6 +1030,70 @@ class ClipboardData:
         if len(freestyle_edges) == 0:
             return None
         return freestyle_edges
+
+    def extract_selection_sets(self):
+        if len(self.polygon_ids) == 0:
+            return None
+        selection_sets = []
+        for vmap_id in self.vmap_ids:
+            vmap = self.VMap(vmap_id)
+            # Vertex selection set
+            if vmap.Type() == lx.symbol.i_VMAP_PICK:
+                sset = {
+                    'name': vmap.Name(),
+                    'type': 'VERT',
+                    'indices': []
+                }
+                for i, vertex_id in enumerate(self.vertex_ids):
+                    v = self.Point(vertex_id)
+                    if self.getPick(vmap, v) == True:
+                        sset['indices'].append(i)
+                selection_sets.append(sset)
+            # Edge selection set
+            elif vmap.Type() == lx.symbol.i_VMAP_EPCK:
+                sset = {
+                    'name': vmap.Name(),
+                    'type': 'EDGE',
+                    'indices': []
+                }
+                for edge_id in self.edge_ids:
+                    e = self.Edge(edge_id)
+                    if self.getEdgePick(vmap, e) == True:
+                        id0, id1 = e.Endpoints()
+                        sset['indices'].append([self.index(self.Point(id0)), self.index(self.Point(id1))])
+                selection_sets.append(sset)
+        # Polygon selection set
+        poly_sset = {}
+        i = 0
+        for poly_id in self.polygon_ids:
+            p = self.Polygon(poly_id)
+            if self.is_keyhole(p):
+                count = p.GenerateTriangles()
+            else:
+                count = 1
+            tagString = self.PickTag(p)
+            if tagString is None:
+                i += count
+                continue
+            tags = tagString.split(";")
+            for j in range(count):
+                for tag in tags:
+                    if tag not in poly_sset:
+                        poly_sset[tag] = [i]
+                    else:
+                        poly_sset[tag].append(i)
+                i += 1
+        for tag, indices in poly_sset.items():
+            sset = {
+                'name': tag,
+                'type': 'FACE',
+                'indices': indices
+            }
+            selection_sets.append(sset)
+                
+        if len(selection_sets) == 0:
+            return None
+        return selection_sets
     
     # get Blender's type name from effect channel of 'imageMap' item
     def get_effect_name(self, layer):
@@ -950,7 +1172,6 @@ class ClipboardData:
             if not mask or mask.type != 'mask':
                 name = 'Default'
             else:
-                lx.out(f"material {material.name} mask {mask.name}")
                 name = mask.channel('ptag').get()
             diffCol = material.channel('diffCol').get()
 
@@ -962,7 +1183,6 @@ class ClipboardData:
             textures = self.extract_textures(material)
             if textures is not None:
                 mat_data['textures'] = textures
-            lx.out(f'Found material: {name} color: {diffCol}')
             self.materials.append(mat_data)
         if len(self.materials) == 0:
             return None
@@ -987,31 +1207,50 @@ class ClipboardData:
             return None
         if len(self.edge_ids) == 0:
             return None
-        # crease edges
-        crease_edges = [0.0] * self.mesh.EdgeCount()
+        id_subdiv = None
+        id_seam = None
+        id_seam_any = None
         for id in self.vmap_ids:
             vmap = self.VMap(id)
             if vmap.Type() == lx.symbol.i_VMAP_SUBDIV:
-                lx.out(f'Found vmap: {vmap.Name()} type: {vmap.Type()}')
-                storageBuffer = lx.object.storage('f', 1)
-                for i in range(self.mesh.EdgeCount()):
-                    e = self.EdgeByIndex(i)
-                    if e.MapEvaluate(id, storageBuffer) == True:
-                        w = storageBuffer.get()
-                        crease_edges[i] = w[0]
-                break
+                id_subdiv = id
+            elif vmap.Type() == i_VMAP_SEAM:
+                if vmap.Name() == '_Seam':
+                    id_seam = id
+                id_seam_any = id
+        if id_seam is None:
+            id_seam = id_seam_any
+        # crease edges
+        crease_edges = [0.0] * self.mesh.EdgeCount()
+        if id_subdiv is not None:
+            storageBuffer = lx.object.storage('f', 1)
+            for i in range(self.mesh.EdgeCount()):
+                e = self.EdgeByIndex(i)
+                if e.MapEvaluate(id_subdiv, storageBuffer) == True:
+                    w = storageBuffer.get()
+                    crease_edges[i] = w[0]
+        # uv seam edges
+        seam_edges = [False] * self.mesh.EdgeCount()
+        if id_seam is not None:
+            storageBuffer = lx.object.storage('f', 1)
+            for i in range(self.mesh.EdgeCount()):
+                e = self.EdgeByIndex(i)
+                if e.MapEvaluate(id_seam, storageBuffer) == True:
+                    seam_edges[i] = True
+            
         # edges
         edges = []
         for i in range(self.mesh.EdgeCount()):
             e = self.EdgeByIndex(i)
-            if crease_edges[i] == 0.0:
+            if crease_edges[i] == 0.0 and seam_edges[i] == False:
                 continue
             id0, id1 = e.Endpoints()
             if self.selected_point(id0) and self.selected_point(id1):
                 edges.append({
                     'vertices': [self.index(self.Point(id0)), self.index(self.Point(id1))],
                     'attributes': {
-                        'crease_edge': crease_edges[i]
+                        'crease_edge': crease_edges[i],
+                        'seam': seam_edges[i]
                     }
                 })
         if len(edges) == 0:
@@ -1028,18 +1267,44 @@ class ClipboardData:
             p_attrs = {
                 'material_index': self.get_material_index(self.MaterialTag(p), self.materials)
             }
-            vertices = []
-            for i in range(p.VertexCount()):
-                v = self.Point(p.VertexByIndex(i))
-                vertices.append(self.index(v))
-            polygons.append({
-                'vertices': vertices,
-                'attributes': p_attrs
-            })
+            if self.is_keyhole(p):
+                count = p.GenerateTriangles()
+                for i in range(count):
+                    vertices = []
+                    for id in p.TriangleByIndex(i):
+                        v = self.Point(id)
+                        vertices.append(self.index(v))
+                    polygons.append({
+                        'vertices': vertices,
+                        'attributes': p_attrs
+                    })
+            else:
+                vertices = []
+                for i in range(p.VertexCount()):
+                    v = self.Point(p.VertexByIndex(i))
+                    vertices.append(self.index(v))
+                polygons.append({
+                    'vertices': vertices,
+                    'attributes': p_attrs
+                })
         if len(polygons) == 0:
             return None
         return polygons
 
+    # check if the polygon has bridge edge to connect between outer and an inner loop
+    def is_keyhole(self, p):
+        count = p.VertexCount()
+        if count < 8:
+            return False
+        edge_map = {}
+        for i in range(count):
+            id0 = p.VertexByIndex(i)
+            id1 = p.VertexByIndex((i + 1) % count)
+            if i > 2:
+                if (id1, id0) in edge_map:
+                    return True
+            edge_map[(id0, id1)] = True
+        return False
 
     # Main copy function
     def copy(self, external_clipboard='tempfile'):
@@ -1075,8 +1340,6 @@ class ClipboardData:
         scl = (matrix[0][0], matrix[1][1], matrix[2][2])
         quat = modo.Quaternion()
         quat.fromMatrix3(matrix)
-
-        lx.out(f"pos {pos} quat {quat} scl {scl}")
 
         # store all selected mesh elements
         selected = self.setup_mesh_elements()
@@ -1142,6 +1405,11 @@ class ClipboardData:
         colors = self.extract_colors()
         if colors:
             cobj['mesh']['colors'] = colors
+
+        # export selection sets
+        selection_sets = self.extract_selection_sets()
+        if selection_sets:
+            cobj['mesh']['selection_sets'] = selection_sets
 
         # CPMF data
         data = {

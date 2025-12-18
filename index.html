@@ -386,6 +386,12 @@ Material and texture data are output. Only diffuse color and the texture file pa
 UV maps is output as Blender UV Set data.</p>
 <p><strong>Freestyle edge</strong><br>
 Import Freestyle edges from Blender into edge selection set vmap named &quot;_Freestyle&quot;. If an edge selection set named &quot;_Freestyle&quot; is in the current mesh, it will be output as Freestyle data.</p>
+<p><strong>RGB, RGBA Map</strong><br>
+RGB, RGBA maps are output as Blender Color Attributes data with Face_Corner domain.</p>
+<p><strong>Selection Sets</strong><br>
+Selection Sets for vertex, edge and polygon are output to the selection set feature of YT-Tools for Blender</p>
+<p><strong>UV Seam</strong><br>
+The primary UV Seam map or the UV Seam with &quot;_Seam&quot; name is output to edge seam mark of Blender</p>
 <h2 id="installing">Installing</h2>
 <ul>
 <li>Download lpk from releases. Drag and drop into your Modo viewport. If you're upgrading, delete previous version.</li>
@@ -409,6 +415,11 @@ Import Freestyle edges from Blender into edge selection set vmap named &quot;_Fr
 <ul>
 <li>Fixed several bugs</li>
 <li>Omited unnecessary edge data to reduce file size</li>
+</ul>
+<h3 id="v102-minor-changes">v1.0.2 Minor Changes</h3>
+<ul>
+<li>Support Vertex Colors, Selection Sets and UV Seams</li>
+<li>Export key hole polygon as triangles</li>
 </ul>
 
 </body>
