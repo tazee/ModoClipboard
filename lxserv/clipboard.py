@@ -773,7 +773,7 @@ class ClipboardData:
             positions = mesh_data.get('positions', [])
             edges = mesh_data.get('edges', [])
             polygons = mesh_data.get('polygons', [])
-            materials = mesh_data.get('materials', []) or mesh_data.get('mesh', {}).get('materials', []) or mesh_data.get('materials', [])
+            materials = mesh_data.get('materials', [])
             uv_sets = mesh_data.get('uv_sets', [])
             shapekeys = mesh_data.get('shapekeys', [])
             vertex_groups = mesh_data.get('vertex_groups', [])
@@ -1180,11 +1180,19 @@ class ClipboardData:
     def copy_materials(self):
         if len(self.polygon_ids) == 0:
             return None
+        use_mask_all = True
+        for id in self.polygon_ids:
+            p = self.Polygon(id)
+            if self.MaterialTag(p) is None:
+                use_mask_all = False
+                break
         # Query Existing Materials
         self.materials = []
         for material in self.scene.items("advancedMaterial"):
             mask = material.parent
             if not mask or mask.type != 'mask':
+                if use_mask_all:
+                    continue
                 name = 'Default'
             else:
                 name = mask.channel('ptag').get()
