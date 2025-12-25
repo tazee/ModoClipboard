@@ -1214,6 +1214,13 @@ class ClipboardData:
             self.polygon_accessor = lx.object.Polygon (self.mesh.PolygonAccessor ())
             self.map_accessor = lx.object.MeshMap (self.mesh.MeshMapAccessor ())
 
+            # set object name if the current mesh is empty
+            if new_mesh == False:
+                if self.mesh.PointCount() == 0:
+                    name = obj_data['name']
+                    if name:
+                        self.item.SetName(name)
+
             # store all vertex maps
             self.setup_vmap_ids()
         
