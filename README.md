@@ -81,3 +81,8 @@ Specifies the type of external clipboard. The default is **Temporary File**. If 
 
 - Support Vertex Colors, Selection Sets and UV Seams
 - Export key hole polygon as triangles
+
+### v1.1 New Features
+
+- Support copy and paste multiple objects
+- Support left-hand Y-Up coordinate system
