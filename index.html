@@ -408,7 +408,13 @@ The primary UV Seam map or the UV Seam with &quot;_Seam&quot; name is output to 
 <h3 id="new-mesh-from-clipboard">New Mesh from Clipboard</h3>
 <p>Builds the mesh imported from the clipboard into a newly created mesh item, replacing the current mesh.</p>
 <h3 id="type">Type</h3>
-<p>Specifies the type of external clipboard. The default is <strong>Temporary File</strong>. If you specify <strong>OS Clipboard</strong>, the converted JSON text data will be used on the OS standard clipboard. This can be used to check or modify the copied data.
+<p>Specifies the type of external clipboard. The default is <strong>Temporary File</strong>. If you specify <strong>OS Clipboard</strong>, the converted JSON text data will be used on the OS standard clipboard. This can be used to check or modify the copied data.</p>
+<h3 id="replace-mesh">Replace Mesh</h3>
+<p>If <strong>Replace Mesh</strong> is enabled, the destination mesh will be deleted before pasting the data from the clipboard.</p>
+<h3 id="replace-material">Replace Material</h3>
+<p>If <strong>Replace Material</strong> is enabled, the material will be overwritten if the destination mesh has a material with the same name. If <strong>Replace Material</strong> is disabled, the material will not be changed.</p>
+<h3 id="import-transform">Import Transform</h3>
+<p>Enabling <strong>Import Transform</strong> will set the object's translation, rotation, scale and parenting data to the Modo item transform. This option is only available for <strong>New Mesh from Clipboard</strong> command.
 <br></p>
 <h2 id="history">History</h2>
 <h3 id="v101-bug-fix">v1.0.1 Bug Fix</h3>
@@ -425,6 +431,11 @@ The primary UV Seam map or the UV Seam with &quot;_Seam&quot; name is output to 
 <ul>
 <li>Support copy and paste multiple objects</li>
 <li>Support left-hand Y-Up coordinate system</li>
+</ul>
+<h3 id="v111-minor-changes">v1.1.1 Minor Changes</h3>
+<ul>
+<li>Added Replace Mesh, Replace Material and Import Transform options</li>
+<li>Fixed some bugs</li>
 </ul>
 
 </body>

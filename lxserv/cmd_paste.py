@@ -42,9 +42,17 @@ class ClipboardPaste(lxu.command.BasicCommand):
 
     def basic_Execute(self, msg, flags):
         type = lx.eval("clipboard.settings type:?")
+        replace_mesh = lx.eval("clipboard.settings replace_mesh:?")
+        replace_material = lx.eval("clipboard.settings replace_material:?")
+        import_transform = lx.eval("clipboard.settings import_transform:?")
         new_mesh = self.dyna_Int(0)
-        lx.out(f"ClipboardPaste: Executing Paste to External new_mesh {new_mesh} type {type}")
-        clipboard.ClipboardData().paste(external_clipboard=type, new_mesh=new_mesh)
+        lx.out(f"ClipboardPaste: Executing Paste to External new_mesh {new_mesh} type {type} import_transform {import_transform}")
+        if replace_mesh and new_mesh == 0:
+            lx.eval("select.delete")
+        clipboard.ClipboardData().paste(external_clipboard=type, \
+                                        new_mesh=new_mesh, \
+                                        replace_material=replace_material, \
+                                        import_transform=import_transform)
 
     def cmd_Query(self, index, vaQuery):
         lx.notimpl()

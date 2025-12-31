@@ -213,6 +213,7 @@ class ClipboardData:
         self.mark_select = None
         self.selType = None
         self.base_nvert = 0
+        self.items = []
 
     def selected(self, v):
         return v.TestMarks(self.mark_select)
@@ -430,6 +431,44 @@ class ClipboardData:
     def setPickTag(self, p, tag):
         loc = lx.object.StringTag(p)
         return loc.Set(lx.symbol.i_POLYTAG_PICK, tag)
+    
+    def getRotOrder(self):
+        locator = lx.object.Locator(self.item)
+        xfrm = locator.GetTransformItem(lx.symbol.iXFRM_ROTATION)
+        chan = xfrm.ChannelLookup(lx.symbol.sICHAN_ROTATION_ORDER)
+        chan_read = lx.object.ChannelRead(self.scene.Channels(None, 0.0))
+        rot_order = chan_read.Integer(xfrm, chan)
+        if rot_order == 0:
+            return 'XYZ'
+        elif rot_order == 1:
+            return 'XZY'
+        elif rot_order == 2:
+            return 'YXZ'
+        elif rot_order == 3:
+            return 'YZX'
+        elif rot_order == 4:
+            return 'ZXY'
+        else:
+            return 'ZYX'
+    
+    def setRotOrder(self, order):
+        locator = lx.object.Locator(self.item)
+        xfrm = locator.GetTransformItem(lx.symbol.iXFRM_ROTATION)
+        chan = xfrm.ChannelLookup(lx.symbol.sICHAN_ROTATION_ORDER)
+        chan_write = lx.object.ChannelWrite(self.scene.Channels(None, 0.0))
+        if order == 'XYZ':
+            rot_order = 0
+        elif order == 'XZY':
+            rot_order = 1
+        elif order == 'YXZ':
+            rot_order = 2
+        elif order == 'YZX':
+            rot_order = 3
+        elif order == 'ZXY':
+            rot_order = 4
+        else:
+            rot_order = 5
+        chan_write.Integer(xfrm, chan, rot_order)
 
     def setup_mesh_elements(self):
         # store selected vertices
@@ -551,7 +590,15 @@ class ClipboardData:
 
         items = []
         for layer_index in range(layer_scan.Count()):
-            items.append(layer_scan.MeshItem (layer_index))
+            item = layer_scan.MeshItem (layer_index)
+            items.append(item)
+        locators = []
+        for item in items:
+            modo_item = modo.LocatorSuperType(item)
+            parent = modo_item.parent
+            if parent is not None and parent not in items:
+                items.append(parent)
+                locators.append(parent)
 
         for layer_index in range(layer_scan.Count()):
             # setup the accessor
@@ -562,11 +609,14 @@ class ClipboardData:
             self.polygon_accessor = lx.object.Polygon (self.mesh.PolygonAccessor ())
             self.map_accessor = lx.object.MeshMap (self.mesh.MeshMapAccessor ())
 
-            matrix = modo.Matrix4(layer_scan.MeshTransform (layer_index))
-            pos = matrix.position
-            scl = (matrix[0][0], matrix[1][1], matrix[2][2])
+            order = self.getRotOrder()
+
+            modo_item = modo.Mesh(self.item)
+            pos = modo_item.position.get()
+            scl = modo_item.scale.get()
+            rot = modo_item.rotation.get()
             quat = modo.Quaternion()
-            quat.fromMatrix3(matrix)
+            quat.fromMatrix4(modo.Matrix4().fromEuler(rot,order))
 
             # store all selected mesh elements
             selected = self.setup_mesh_elements()
@@ -582,7 +632,8 @@ class ClipboardData:
                 'type': 'MESH',
                 'object_transform': {
                     'translation': [pos[0], pos[1], pos[2]],
-                    'rotation_quat': [quat[0], quat[1], quat[2], quat[3]],
+                    'rotation_euler': [rot[0], rot[1], rot[2], order],
+                    'rotation_quat': [quat[3], quat[0], quat[1], quat[2]],
                     'scale': [scl[0], scl[1], scl[2]]
                 },
             }
@@ -645,6 +696,9 @@ class ClipboardData:
 
             data['objects'].append(cobj)
 
+        # copy locator items for parenting
+        self.copy_locators(data, locators, items)
+
         lx.out(f'Generated CPMF v1.0 data {external_clipboard}')
 
         # JSON dump
@@ -673,6 +727,47 @@ class ClipboardData:
 
         lx.out('CPMF v1.0 export completed')
         return True
+
+    # test if item type or superType is equal to test
+    def itemTypeTest(self, modo_item, test):
+        scene_svc = lx.service.Scene()
+        type_id = scene_svc.ItemTypeLookup(modo_item.type)
+        while type_id:
+            if test == scene_svc.ItemTypeName(type_id):
+                return True
+            type_id = scene_svc.ItemTypeSuper(type_id)
+        return False
+
+    # copy locator items for parenting
+    def copy_locators(self, data, locators, items):
+        for locator in locators:
+            self.item = lx.object.Item(locator)
+            order = self.getRotOrder()
+            modo_item = modo.LocatorSuperType(self.item)
+            pos = modo_item.position.get()
+            scl = modo_item.scale.get()
+            rot = modo_item.rotation.get()
+            quat = modo.Quaternion()
+            quat.fromMatrix4(modo.Matrix4().fromEuler(rot,order))
+            type = 'EMPTY'
+            if self.itemTypeTest(modo_item, lx.symbol.sITYPE_LIGHT):
+                type = 'LIGHT'
+            elif self.itemTypeTest(modo_item, lx.symbol.sITYPE_CAMERA):
+                type = 'CAMERA'
+            cobj = {
+                'name': self.item.UniqueName(),
+                'type': type,
+                'object_transform': {
+                    'translation': [pos[0], pos[1], pos[2]],
+                    'rotation_euler': [rot[0], rot[1], rot[2], order],
+                    'rotation_quat': [quat[3], quat[0], quat[1], quat[2]],
+                    'scale': [scl[0], scl[1], scl[2]]
+                },
+            }
+            parent = self.get_item_parent(self.item, items)
+            if parent is not None:
+                cobj['parent'] = parent
+            data['objects'].append(cobj)
     
     # get item parent index
     def get_item_parent(self, item, items):
@@ -1059,6 +1154,7 @@ class ClipboardData:
         id_subdiv = None
         id_seam = None
         id_seam_any = None
+        id_hard = None
         for id in self.vmap_ids:
             vmap = self.VMap(id)
             if vmap.Type() == lx.symbol.i_VMAP_SUBDIV:
@@ -1067,6 +1163,8 @@ class ClipboardData:
                 if vmap.Name() == '_Seam':
                     id_seam = id
                 id_seam_any = id
+            elif vmap.Type() == lx.symbol.i_VMAP_HARDEDGE:
+                id_hard = id
         if id_seam is None:
             id_seam = id_seam_any
         # crease edges
@@ -1086,12 +1184,20 @@ class ClipboardData:
                 e = self.EdgeByIndex(i)
                 if e.MapEvaluate(id_seam, storageBuffer) == True:
                     seam_edges[i] = True
+        # hard edges
+        smooth_edges = [True] * self.mesh.EdgeCount()
+        if id_hard is not None:
+            storageBuffer = lx.object.storage('f', 1)
+            for i in range(self.mesh.EdgeCount()):
+                e = self.EdgeByIndex(i)
+                if e.MapEvaluate(id_hard, storageBuffer) == True:
+                    smooth_edges[i] = False
             
         # edges
         edges = []
         for i in range(self.mesh.EdgeCount()):
             e = self.EdgeByIndex(i)
-            if crease_edges[i] == 0.0 and seam_edges[i] == False:
+            if crease_edges[i] == 0.0 and seam_edges[i] == False and smooth_edges[i] == True:
                 continue
             id0, id1 = e.Endpoints()
             if self.selected_point(id0) and self.selected_point(id1):
@@ -1099,7 +1205,8 @@ class ClipboardData:
                     'vertices': [self.index(self.Point(id0)), self.index(self.Point(id1))],
                     'attributes': {
                         'crease_edge': crease_edges[i],
-                        'seam': seam_edges[i]
+                        'seam': seam_edges[i],
+                        'smooth': smooth_edges[i]
                     }
                 })
         if len(edges) == 0:
@@ -1155,8 +1262,77 @@ class ClipboardData:
             edge_map[(id0, id1)] = True
         return False
 
+    # set item parent
+    def set_parents(self):
+        for i, obj_data in enumerate(self.data.get('objects', [])):
+            parent_index = obj_data.get('parent', None)
+            if parent_index != None:
+                self.items[i].setParent(newParent=self.items[parent_index])
+    
+    # set object transform
+    def set_object_transform(self, obj_data):
+        coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
+        obj_transform = obj_data.get('object_transform', {})
+        modo_item = modo.LocatorSuperType(self.item)
+        self.items.append(modo_item)
+        if 'y_up_rh' in coord:
+            modo_item.position.set(obj_transform.get('translation', [0.0, 0.0, 0.0]))
+            modo_item.scale.set(obj_transform.get('scale', [1.0, 1.0, 1.0]))
+            rotation_euler = obj_transform.get('rotation_euler')
+            rotation_quat = obj_transform.get('rotation_quat')
+            if rotation_euler is not None:
+                x, y, z, order = rotation_euler
+                modo_item.rotation.set([x, y, z])
+            if rotation_quat is not None:
+                w, x, y, z = rotation_quat
+                quat = modo.Quaternion((x, y, z, w))
+                modo_item.rotation.set(quat.asEuler())
+        else:
+            loc = modo.Vector3(obj_transform.get('translation', [0.0, 0.0, 0.0]))
+            scl = modo.Vector3(obj_transform.get('scale', [1.0, 1.0, 1.0]))
+            rotation_quat = obj_transform.get('rotation_quat', [1, 0, 0, 0])
+            # The order of elements is different between Blender and Modo
+            # Blender: mathutils.Quaternion (w, x, y, z)
+            # Modo: modo.Quaternion (x, y, z, w)
+            w, x, y, z = rotation_quat
+            quat = modo.Quaternion((x, y, z, w))
+            mat_rot = quat.toMatrix4()
+            mat_loc = modo.Matrix4()
+            mat_loc[0][3] = loc[0]
+            mat_loc[1][3] = loc[1]
+            mat_loc[2][3] = loc[2]
+            mat_scl = modo.Matrix4()
+            mat_scl[0][0] = scl[0]
+            mat_scl[1][1] = scl[1]
+            mat_scl[2][2] = scl[2]
+            # Restore matrix_local from Blender
+            matrix = mat_loc * mat_rot * mat_scl
+            #print(f"** matrix_local {matrix}")
+            matrix.transpose()
+            if 'z_up_rh' in coord:
+                matrix = modo.Matrix4(B2M) * matrix * modo.Matrix4(M2B)
+            elif 'y_up_lh' in coord:
+                matrix = modo.Matrix4(L2M) * matrix * modo.Matrix4(M2L)
+            pos = matrix.position
+            scl = [modo.Vector3(matrix[i]).length() for i in range(3)]
+            #print(f"** postion {pos} scl {scl} euler {matrix.asEuler()}")
+            modo_item.position.set(pos)
+            modo_item.scale.set(scl)
+            modo_item.rotation.set(matrix.asEuler())
+
+    # get Modo's item type
+    def get_item_type(self, type):
+        if type == 'MESH':
+            return lx.symbol.sITYPE_MESH
+        elif type == 'LIGHT':
+            return lx.symbol.sITYPE_POINTLIGHT
+        elif type == 'CAMERA':
+            return lx.symbol.sITYPE_CAMERA
+        else:
+            return lx.symbol.sITYPE_LOCATOR 
+
     # Main paste function
-    def paste(self, external_clipboard='tempfile', new_mesh=False):
+    def paste(self, external_clipboard='tempfile', new_mesh=False, replace_material=False, import_transform=False):
         #print(f'Pasting from external clipboard: {external_clipboard}, new_mesh={new_mesh}')
         if external_clipboard == 'tempfile':
             path = get_cpmf_tempfile_path()
@@ -1181,6 +1357,9 @@ class ClipboardData:
         except Exception as e:
             lx.out({'ERROR'}, f'Invalid JSON: {e}')
             return False
+
+        self.replace_material = replace_material
+        self.import_transform = import_transform
         
         # Add a new mesh object to the scene and grab the geometry object
         self.scene = modo.Scene()
@@ -1199,12 +1378,22 @@ class ClipboardData:
             selection_sets = mesh_data.get('selection_sets', [])
 
             if new_mesh == True:
-                mesh = self.scene.addMesh(obj_data['name'])
-                self.scene.select(mesh)
+                if obj_data['type'] == 'MESH':
+                    mesh = self.scene.addMesh(obj_data['name'])
+                    self.scene.select(mesh)
+                else:
+                    type = self.get_item_type(obj_data['type'])
+                    self.item = self.scene.addItem(type, name=obj_data['name'])
+                    if self.import_transform:
+                        self.set_object_transform(obj_data)
+                    continue
+            else:
+                if obj_data['type'] != 'MESH':
+                    continue
 
             layer_svc = lx.service.Layer()
             scan1 = layer_svc.ScanAllocate(lx.symbol.f_LAYERSCAN_EDIT | lx.symbol.f_LAYERSCAN_PRIMARY)
-            if scan1.test() == False:
+            if scan1.test() == False or scan1.Count() == 0:
                 return
 
             self.item = lx.object.Item (scan1.MeshItem (0))
@@ -1220,6 +1409,10 @@ class ClipboardData:
                     name = obj_data['name']
                     if name:
                         self.item.SetName(name)
+
+            # set object transform
+            if self.import_transform:
+                self.set_object_transform(obj_data)
 
             # store all vertex maps
             self.setup_vmap_ids()
@@ -1261,7 +1454,7 @@ class ClipboardData:
             # Apply edge vertex map values using layer scan since MeshGetPolyEdge 
             # was crashed at Endpoints method
             scan2 = layer_svc.ScanAllocate(lx.symbol.f_LAYERSCAN_EDIT | lx.symbol.f_LAYERSCAN_PRIMARY)
-            if scan2.test() == False:
+            if scan2.test() == False or scan2.Count() == 0:
                 return
 
             self.item = lx.object.Item (scan2.MeshItem (0))
@@ -1286,6 +1479,9 @@ class ClipboardData:
             scan2.SetMeshChange(0, lx.symbol.f_MESHEDIT_MAP_OTHER|lx.symbol.f_MESHEDIT_POL_TAGS)
             scan2.Apply()
             scan2 = None
+
+        if self.import_transform:
+            self.set_parents()
 
     def paste_vertices(self, positions):
         coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
@@ -1351,11 +1547,32 @@ class ClipboardData:
                 if vmap is None:
                     vmap = self.addMap(i_VMAP_SEAM, "_Seam")
                 self.setEdgePick(vmap, e)
+        # hard edge map
+        vmap = self.lookupMap(lx.symbol.i_VMAP_HARDEDGE, "Hard Edge")
+        if vmap != None:
+            for edge in edges:
+                e = self.select_edge(edge.get('vertices', []))
+                if e is None:
+                    continue
+                smooth = edge.get('attributes', {}).get('smooth', True)
+                if smooth is False:
+                    if vmap is None:
+                        vmap = self.addMap(lx.symbol.i_VMAP_HARDEDGE, "Hard Edge")
+                    self.setEdgePick(vmap, e)
 
     def get_type_name(self, type):
         if type == 'base_color':
             return 'diffColor'
         return None
+    
+    def find_item_by_name(self, name, type):
+        for material in self.scene.items(type):
+            if material.name == name:
+                return material
+        return None
+
+    def find_material_item(self, name):
+        return self.find_item_by_name(name, 'advancedMaterial')
 
     def paste_textures(self, material, mask):
         base_dir = self.data.get('metadata', {}).get('custom', {}).get('base_dir', None)
@@ -1373,12 +1590,13 @@ class ClipboardData:
                     img_path = candidate
             name = os.path.basename(img_path)
             #print(f"image_path {img_path} name {name}")
-            layer = self.scene.addItem('imageMap')
-            layer.SetName(name)
-            layer.channel('effect').set(effect)
-            layer.setParent(mask, index=1)
+            layer = self.find_item_by_name(name, 'imageMap')
+            if layer is None:
+                layer = self.scene.addItem('imageMap')
+                layer.SetName(name)
+                layer.channel('effect').set(effect)
+                layer.setParent(mask, index=1)
             graph = layer.itemGraph(lx.symbol.sGRAPH_SHADELOC)
-            #print(f"-- add imageMap layer {layer.name}")
             item_image = None
             item_txtrLocator = None
             for it in graph.forward():
@@ -1401,16 +1619,28 @@ class ClipboardData:
                 item.channel('projType').set('uv')
                 if uv_map_name:
                     item.channel('uvMap').set(uv_map_name)
-                
+
 
     def paste_materials(self, materials):
         for material in materials:
             name = material.get('name', '')
             col = material.get('base_color', ())
-            mat = self.scene.addMaterial(name='M_' + name)
+            mat_name = 'M_' + name
+            mat = self.find_material_item(mat_name)
+            if mat is not None:
+                if self.replace_material:
+                    self.scene.removeItems(mat, children=True)
+                else:
+                    continue
+            mat = self.scene.addMaterial(name=mat_name)
             mat.channel('diffCol').set(col)
-            mask = self.scene.addItem('mask', name=name)
-            mask.channel('ptag').set(name)
+            mask = self.find_item_by_name(name, 'mask')
+            if mask is not None and self.replace_material:
+                self.scene.removeItems(mask, children=True)
+                mask = None
+            if mask is None:
+                mask = self.scene.addItem('mask', name=name)
+                mask.channel('ptag').set(name)
             mat.setParent(mask, index=1)
             self.paste_textures(material, mask)
 

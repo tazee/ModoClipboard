@@ -68,6 +68,15 @@ Builds the mesh imported from the clipboard into a newly created mesh item, repl
 ### Type
 
 Specifies the type of external clipboard. The default is **Temporary File**. If you specify **OS Clipboard**, the converted JSON text data will be used on the OS standard clipboard. This can be used to check or modify the copied data.
+
+### Replace Mesh
+If **Replace Mesh** is enabled, the destination mesh will be deleted before pasting the data from the clipboard.
+
+### Replace Material
+If **Replace Material** is enabled, the material will be overwritten if the destination mesh has a material with the same name. If **Replace Material** is disabled, the material will not be changed.
+
+### Import Transform
+Enabling **Import Transform** will set the object's translation, rotation, scale and parenting data to the Modo item transform. This option is only available for **New Mesh from Clipboard** command.
 <br>
 
 ## History
@@ -86,3 +95,8 @@ Specifies the type of external clipboard. The default is **Temporary File**. If 
 
 - Support copy and paste multiple objects
 - Support left-hand Y-Up coordinate system
+
+### v1.1.1 Minor Changes
+
+- Added Replace Mesh, Replace Material and Import Transform options
+- Fixed some bugs
