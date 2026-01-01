@@ -41,6 +41,13 @@ Selection Sets for vertex, edge and polygon are output to the selection set feat
 **UV Seam**<br>
 The primary UV Seam map or the UV Seam with "_Seam" name is output to edge seam mark of Blender
 
+**Hard edge**<br>
+Import Hard Edge marks from Blender into edge selection set to hard edge vmap in Modo.
+
+**Object Transform**<br>
+Import the object transform data such as location, rotation, scale and parenting from Blender to item transform in Modo when **Import Transform** and **New Mesh from Clipboard** options enabled.
+
+
 ## Installing
 
 - Download lpk from releases. Drag and drop into your Modo viewport. If you're upgrading, delete previous version.
@@ -99,4 +106,5 @@ Enabling **Import Transform** will set the object's translation, rotation, scale
 ### v1.1.1 Minor Changes
 
 - Added Replace Mesh, Replace Material and Import Transform options
+- Import hard edge mark from Blender into hard edge vmap in Modo.
 - Fixed some bugs
