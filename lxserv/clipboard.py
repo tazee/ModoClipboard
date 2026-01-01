@@ -1549,16 +1549,15 @@ class ClipboardData:
                 self.setEdgePick(vmap, e)
         # hard edge map
         vmap = self.lookupMap(lx.symbol.i_VMAP_HARDEDGE, "Hard Edge")
-        if vmap != None:
-            for edge in edges:
-                e = self.select_edge(edge.get('vertices', []))
-                if e is None:
-                    continue
-                smooth = edge.get('attributes', {}).get('smooth', True)
-                if smooth is False:
-                    if vmap is None:
-                        vmap = self.addMap(lx.symbol.i_VMAP_HARDEDGE, "Hard Edge")
-                    self.setEdgePick(vmap, e)
+        for edge in edges:
+            e = self.select_edge(edge.get('vertices', []))
+            if e is None:
+                continue
+            smooth = edge.get('attributes', {}).get('smooth', True)
+            if smooth is False:
+                if vmap is None:
+                    vmap = self.addMap(lx.symbol.i_VMAP_HARDEDGE, "Hard Edge")
+                self.setEdgePick(vmap, e)
 
     def get_type_name(self, type):
         if type == 'base_color':
