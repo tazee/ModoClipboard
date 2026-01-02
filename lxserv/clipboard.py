@@ -1480,7 +1480,7 @@ class ClipboardData:
             scan2.Apply()
             scan2 = None
 
-        if self.import_transform:
+        if self.import_transform and new_mesh:
             self.set_parents()
 
     def paste_vertices(self, positions):
