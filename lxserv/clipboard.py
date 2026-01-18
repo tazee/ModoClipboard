@@ -1091,7 +1091,7 @@ class ClipboardData:
                         filename = channel.get()
                         texture['image'] = filename
 
-                if texture['uv_map'] is not None and texture['image'] is not None:
+                if texture.get['uv_map'] is not None and texture.get['image'] is not None:
                     textures.append(texture)
         if len(textures) == 0:
             return None
