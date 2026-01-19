@@ -108,3 +108,7 @@ Enabling **Import Transform** will set the object's translation, rotation, scale
 - Added Replace Mesh, Replace Material and Import Transform options
 - Import hard edge mark from Blender into hard edge vmap in Modo.
 - Fixed some bugs
+
+### v1.1.2 Bug Fix
+
+- Fixed a bug at extracting texture
