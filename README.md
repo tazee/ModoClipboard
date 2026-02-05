@@ -32,6 +32,9 @@ UV maps is output as Blender UV Set data.
 **Freestyle edge**<br>
 Import Freestyle edges from Blender into edge selection set vmap named "_Freestyle". If an edge selection set named "_Freestyle" is in the current mesh, it will be output as Freestyle data.
 
+**Freestyle face**<br>
+Import Freestyle faces from Blender into Part polygon tag named "_Freestyle". If a Part polygon tag named "_Freestyle" is in the current mesh, it will be output as Freestyle data.
+
 **RGB, RGBA Map**<br>
 RGB, RGBA maps are output as Blender Color Attributes data with Face_Corner domain.
 
@@ -112,3 +115,7 @@ Enabling **Import Transform** will set the object's translation, rotation, scale
 ### v1.1.2 Bug Fix
 
 - Fixed a bug at extracting texture
+
+### v1.2 Minor Changes
+
+- Support copy and paste polygon freestyle marks

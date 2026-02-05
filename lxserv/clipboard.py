@@ -30,30 +30,42 @@ from datetime import datetime
 import os
 import tempfile
 import pathlib
+
+use_msgpack = False
 try:
-    import msgpack
-    use_msgpack = True
+    from ..python import msgpack
+    # use_msgpack = True
 except ImportError:
     msgpack = None
-    use_msgpack = False
 
 i_VMAP_SEAM = 1397047629
 
 # ---------- Clipboard helpers ----------
 try:
     import pyperclip
-    def clipboard_copy(text): pyperclip.copy(text)
-    def clipboard_paste(): return pyperclip.paste()
+
+    def clipboard_copy(text):
+        pyperclip.copy(text)
+
+    def clipboard_paste():
+        return pyperclip.paste()
 except Exception:
     def clipboard_copy(text):
         if sys.platform == 'darwin':
             p = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
             p.communicate(text.encode('utf-8'))
         elif sys.platform.startswith('linux'):
-            p = subprocess.Popen(['xclip','-selection','clipboard'], stdin=subprocess.PIPE)
+            p = subprocess.Popen(
+                ['xclip', '-selection', 'clipboard'],
+                stdin=subprocess.PIPE
+            )
             p.communicate(text.encode('utf-8'))
         elif sys.platform.startswith('win'):
-            cmd = ['powershell', '-NoProfile', '-Command', 'Set-Clipboard -Value ([Text.Encoding]::Utf8.GetString([Text.Encoding]::Utf8.GetBytes($input)))']
+            cmd = [
+                'powershell', '-NoProfile', '-Command',
+                'Set-Clipboard -Value ([Text.Encoding]::Utf8.GetString('
+                '[Text.Encoding]::Utf8.GetBytes($input))))'
+            ]
             p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
             p.communicate(text.encode('utf-8'))
         else:
@@ -70,18 +82,22 @@ except Exception:
             raise RuntimeError('No clipboard method')
 
 # ---------- small helpers ----------
-def get_cpmf_tempfile_path():
-    global use_msgpack
+def get_cpmf_tempfile_path(use_bin=False):
     temp_dir = tempfile.gettempdir()
-    if use_msgpack:
+    if use_bin:
         path = os.path.join(temp_dir, "cpmf_clipboard.bin")
     else:
         path = os.path.join(temp_dir, "cpmf_clipboard.json")
     return path
 
-def write_tempfile(json, path=None):
+def write_tempfile(data, path=None):
     global use_msgpack
-    """Write binary data to path if provided; otherwise create in OS tempdir and return path."""
+    """
+    Write binary data to path if provided; otherwise create in OS tempdir
+    and return path.
+    """
+    if path is None:
+        path = get_cpmf_tempfile_path(use_bin=use_msgpack)
     suffixes = [s.lower() for s in pathlib.Path(path).suffixes]
     use_binary = '.bin' in suffixes and use_msgpack
     d = os.path.dirname(path)
@@ -92,21 +108,25 @@ def write_tempfile(json, path=None):
             pass
     if use_binary:
         with open(path, 'wb') as f:
-            f.write(msgpack.packb(json, use_bin_type=True))
+            f.write(data)
     else:
         with open(path, 'w', encoding='utf-8') as f:
-            f.write(json)
+            f.write(data)
     return os.path.abspath(path)
 
 def read_tempfile(path):
     global use_msgpack
+    if path is None:
+        path = get_cpmf_tempfile_path(use_bin=use_msgpack)
     suffixes = [s.lower() for s in pathlib.Path(path).suffixes]
     use_binary = '.bin' in suffixes and use_msgpack
     # try binary first
     if use_binary:
-        if os.path.exists(path) == True:
+        if os.path.exists(path):
             with open(path, 'rb') as f:
-                return msgpack.unpackb(f.read(), raw=False)
+                return f.read()
+        else:
+            return None
     # then json
     elif '.json' in suffixes:
         with open(path, 'r', encoding='utf-8') as f:
@@ -431,6 +451,18 @@ class ClipboardData:
     def setPickTag(self, p, tag):
         loc = lx.object.StringTag(p)
         return loc.Set(lx.symbol.i_POLYTAG_PICK, tag)
+
+    def PartTag(self, p):
+        loc = lx.object.StringTag(p)
+        try:
+            tag = loc.Get(lx.symbol.i_POLYTAG_PART)
+        except:
+            tag = None
+        return tag
+
+    def setPartTag(self, p, tag):
+        loc = lx.object.StringTag(p)
+        return loc.Set(lx.symbol.i_POLYTAG_PART, tag)
     
     def getRotOrder(self):
         locator = lx.object.Locator(self.item)
@@ -684,6 +716,11 @@ class ClipboardData:
             if freestyle_edges:
                 cobj['mesh']['freestyle_edges'] = freestyle_edges
 
+            # export freestyle faces
+            freestyle_faces = self.copy_face_freestyle()
+            if freestyle_faces:
+                cobj['mesh']['freestyle_faces'] = freestyle_faces
+
             # export RGBA maps
             colors = self.copy_colors()
             if colors:
@@ -701,17 +738,24 @@ class ClipboardData:
 
         lx.out(f'Generated CPMF v1.0 data {external_clipboard}')
 
-        # JSON dump
-        try:
-            txt = json.dumps(data, indent=4)
-        except Exception as e:
-            logging.error(f'Failed to dump JSON: {e}')
-            return False
+        # msgpack / JSON dump
+        if external_clipboard == 'tempfile' and use_msgpack:
+            try:
+                txt = msgpack.packb(data)
+            except Exception as e:
+                logging.error(f'Failed to dump msgpack: {e}')
+                return False
+        else:
+            try:
+                txt = json.dumps(data, indent=4)
+            except Exception as e:
+                logging.error(f'Failed to dump JSON: {e}')
+                return False
 
         # File
         if external_clipboard == 'tempfile':
             try:
-                path = get_cpmf_tempfile_path()
+                path = get_cpmf_tempfile_path(use_bin=use_msgpack)
                 lx.out(f'Temporary file created at: {path}')
                 write_tempfile(txt, path)
             except Exception as e:
@@ -966,6 +1010,39 @@ class ClipboardData:
         if len(freestyle_edges) == 0:
             return None
         return freestyle_edges
+
+    def copy_face_freestyle(self):
+        if len(self.polygon_ids) == 0:
+            return None
+        freestyle_faces = []
+        poly_part = {}
+        i = 0
+        for poly_id in self.polygon_ids:
+            p = self.Polygon(poly_id)
+            if self.is_keyhole(p):
+                count = p.GenerateTriangles()
+            else:
+                count = 1
+            tagString = self.PartTag(p)
+            if tagString is None:
+                i += count
+                continue
+            tags = tagString.split(";")
+            for j in range(count):
+                for tag in tags:
+                    if tag not in poly_part:
+                        poly_part[tag] = [i]
+                    else:
+                        poly_part[tag].append(i)
+                i += 1
+        for tag, indices in poly_part.items():
+            if tag == '_Freestyle':
+                for index in indices:
+                    freestyle_faces.append({'index': index, 'use_freestyle_mark': True})
+                
+        if len(freestyle_faces) == 0:
+            return None
+        return freestyle_faces
 
     def copy_selection_sets(self):
         if len(self.polygon_ids) == 0:
@@ -1335,7 +1412,9 @@ class ClipboardData:
     def paste(self, external_clipboard='tempfile', new_mesh=False, replace_material=False, import_transform=False):
         #print(f'Pasting from external clipboard: {external_clipboard}, new_mesh={new_mesh}')
         if external_clipboard == 'tempfile':
-            path = get_cpmf_tempfile_path()
+            path = get_cpmf_tempfile_path(use_bin=use_msgpack)
+            if use_msgpack and not os.path.exists(path):
+                path = get_cpmf_tempfile_path(use_bin=False)
             lx.out(f'Read file from: {path}')
             if not path:
                 lx.out({'ERROR'}, 'No file path specified for import')
@@ -1352,11 +1431,18 @@ class ClipboardData:
                 lx.out({'ERROR'}, f'Failed to read clipboard: {e}')
                 return False
         # parse
-        try:
-            self.data = json.loads(txt)
-        except Exception as e:
-            lx.out({'ERROR'}, f'Invalid JSON: {e}')
-            return False
+        if external_clipboard == 'tempfile' and use_msgpack:
+            try:
+                self.data = msgpack.unpackb(txt)
+            except Exception as e:
+                lx.out({'ERROR'}, f'Invalid msgpack: {e}')
+                return False
+        else:
+            try:
+                self.data = json.loads(txt)
+            except Exception as e:
+                lx.out({'ERROR'}, f'Invalid JSON: {e}')
+                return False
 
         self.replace_material = replace_material
         self.import_transform = import_transform
@@ -1376,6 +1462,7 @@ class ClipboardData:
             freestyle_edges = mesh_data.get('freestyle_edges', [])
             colors = mesh_data.get('colors', [])
             selection_sets = mesh_data.get('selection_sets', [])
+            freestyle_faces = mesh_data.get('freestyle_faces', [])
 
             if new_mesh == True:
                 if obj_data['type'] == 'MESH':
@@ -1444,6 +1531,10 @@ class ClipboardData:
             # paste vertex shapekeys data to geometry
             if colors:
                 self.paste_colors(colors)
+
+            # paste freestyle data to geometry as polygon part
+            if freestyle_faces:
+                self.paste_face_freestyle(freestyle_faces)
 
             #scan1.Update()
 
@@ -1776,3 +1867,11 @@ class ClipboardData:
                 for index in indices:
                     p = self.Polygon(self.polygon_ids[index])
                     self.setPickTag(p, name)
+
+    def paste_face_freestyle(self, freestyle_faces):
+        for data in freestyle_faces:
+            index = data.get('index')
+            use_freestyle_mark = data.get('use_freestyle_mark')
+            if use_freestyle_mark:
+                p = self.Polygon(self.polygon_ids[index])
+                self.setPartTag(p, '_Freestyle')
