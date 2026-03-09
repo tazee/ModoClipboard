@@ -1064,6 +1064,8 @@ class ClipboardData:
                 selection_sets.append(sset)
             # Edge selection set
             elif vmap.Type() == lx.symbol.i_VMAP_EPCK:
+                if vmap.Name() == '_Freestyle':
+                    continue
                 sset = {
                     'name': vmap.Name(),
                     'type': 'EDGE',
@@ -1181,7 +1183,8 @@ class ClipboardData:
         use_mask_all = True
         for id in self.polygon_ids:
             p = self.Polygon(id)
-            if self.MaterialTag(p) is None:
+            tag = self.MaterialTag(p)
+            if tag is None or tag == 'Default':
                 use_mask_all = False
                 break
         # Query Existing Materials
@@ -1360,10 +1363,11 @@ class ClipboardData:
             if rotation_euler is not None:
                 x, y, z, order = rotation_euler
                 modo_item.rotation.set([x, y, z])
-            if rotation_quat is not None:
+            elif rotation_quat is not None:
                 w, x, y, z = rotation_quat
                 quat = modo.Quaternion((x, y, z, w))
-                modo_item.rotation.set(quat.asEuler())
+                mat3 = quat.toMatrix3()
+                modo_item.rotation.set(mat3.asEuler())
         else:
             loc = modo.Vector3(obj_transform.get('translation', [0.0, 0.0, 0.0]))
             scl = modo.Vector3(obj_transform.get('scale', [1.0, 1.0, 1.0]))
@@ -1512,6 +1516,7 @@ class ClipboardData:
             if polygons:
                 self.paste_polygons(polygons, materials)
 
+            #print(f"name {obj_data['name']} positions {len(positions)} {len(self.vertex_ids)} polygons {len(polygons)} {len(self.polygon_ids)}")
             # paste materials data to geometry
             if materials:
                 self.paste_materials(materials)
@@ -1613,9 +1618,12 @@ class ClipboardData:
         id1 = self.vertex_ids[i1]
         if id0 is None or id1 is None:
             return None
-        self.edge_accessor.SelectEndpoints(id0, id1)
+        try:
+            self.edge_accessor.SelectEndpoints(id0, id1)
+        except Exception:
+            return None
         return self.edge_accessor
-    
+
     def paste_edges(self, edges):
         # Subdivision map
         vmap = self.lookupMap(lx.symbol.i_VMAP_SUBDIV, "Subdivision")
@@ -1855,6 +1863,8 @@ class ClipboardData:
                     v = self.Point(self.vertex_ids[index])
                     self.setVertexPick(vmap, v)
             elif type == 'EDGE':
+                if name == '_Freestyle':
+                    continue
                 vmap = self.lookupMap(lx.symbol.i_VMAP_EPCK, name)
                 if not vmap:
                     vmap = self.addMap(lx.symbol.i_VMAP_EPCK, name)
