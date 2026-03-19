@@ -330,6 +330,15 @@ class ClipboardData:
         else:
             return rgba
 
+    def getNormal(self, vmap, p, point_id):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(3)
+        if p.MapEvaluate(vmap.ID(), point_id, storage) == False:
+            return None
+        vec = storage.get()
+        return vec
+
     def getAbsolutePosition(self, vmap, v):
         storage = lx.object.storage()
         storage.setType('f')
@@ -376,6 +385,13 @@ class ClipboardData:
         storage.setSize(4)
         storage.set(color)
         v.SetMapValue(vmap.ID(), storage)
+
+    def setCornerNormal(self, vmap, p, point_id, vec):
+        storage = lx.object.storage()
+        storage.setType('f')
+        storage.setSize(3)
+        storage.set(vec)
+        p.SetMapValue(point_id, vmap.ID(), storage)
 
     def setEdgePick(self, vmap, e):
         storage = lx.object.storage()
@@ -561,6 +577,7 @@ class ClipboardData:
         self.vmap_morph_ids = []
         self.vmap_weight_ids = []
         self.vmap_color_ids = []
+        self.vmap_normal_ids = []
         visitor = QueryMapsVisitor(self.map_accessor, self.vmap_ids)
         self.map_accessor.Enumerate(lx.symbol.iMARK_ANY, visitor, 0)
 
@@ -578,6 +595,8 @@ class ClipboardData:
                 self.vmap_color_ids.append(vmap_id)
             elif vmap.Type() == lx.symbol.i_VMAP_RGBA:
                 self.vmap_color_ids.append(vmap_id)
+            elif vmap.Type() == lx.symbol.i_VMAP_NORMAL:
+                self.vmap_normal_ids.append(vmap_id)
             else:
                 continue
 
@@ -730,6 +749,11 @@ class ClipboardData:
             selection_sets = self.copy_selection_sets()
             if selection_sets:
                 cobj['mesh']['selection_sets'] = selection_sets
+
+            # export vertex normals
+            normals = self.copy_normals()
+            if normals:
+                cobj['mesh']['normals'] = normals
 
             data['objects'].append(cobj)
 
@@ -1109,6 +1133,56 @@ class ClipboardData:
         if len(selection_sets) == 0:
             return None
         return selection_sets
+
+    def copy_normals(self):
+        if len(self.polygon_ids) == 0:
+            return None
+        if len(self.vmap_normal_ids) == 0:
+            return None
+        normals = []
+        vmap_id = self.vmap_normal_ids[0]
+        vmap = self.VMap(vmap_id)
+        i = 0
+        for poly_id in self.polygon_ids:
+            p = self.Polygon(poly_id)
+            if self.is_keyhole(p):
+                count = p.GenerateTriangles()
+                for j in range(count):
+                    face_normal = {
+                        'index': i,
+                        'values': []
+                    }
+                    i += 1
+                    n = 0
+                    for point_id in p.TriangleByIndex(j):
+                        vec = self.getNormal(vmap, p, point_id)
+                        if vec is None:
+                            face_normal['values'].append([0.0, 0.0, 0.0])
+                        else:
+                            face_normal['values'].append([vec[0], vec[1], vec[2]])
+                            n += 1
+                    if n > 0:
+                        normals.append(face_normal)
+            else:
+                face_normal = {
+                    'index': i,
+                    'values': []
+                }
+                i += 1
+                n = 0
+                for j in range(p.VertexCount()):
+                    point_id = p.VertexByIndex(j)
+                    vec = self.getNormal(vmap, p, point_id)
+                    if vec is None:
+                        face_normal['values'].append([0.0, 0.0, 0.0])
+                    else:
+                        face_normal['values'].append([vec[0], vec[1], vec[2]])
+                        n += 1
+                if n > 0:
+                    normals.append(face_normal)
+        if len(normals) == 0:
+            return None
+        return normals
     
     # get Blender's type name from effect channel of 'imageMap' item
     def get_effect_name(self, layer):
@@ -1143,7 +1217,9 @@ class ClipboardData:
                 if effect is None:
                     continue
                 texture = {
-                    'type': effect
+                    'type': effect,
+                    'uv_map': None,
+                    'image': None
                 }
                 # find texture locator and videoStill item linking to the image map
                 for it in layer.itemGraph (lx.symbol.sGRAPH_SHADELOC).forward ():
@@ -1170,7 +1246,7 @@ class ClipboardData:
                         filename = channel.get()
                         texture['image'] = filename
 
-                if texture.get['uv_map'] is not None and texture.get['image'] is not None:
+                if texture['uv_map'] is not None and texture['image'] is not None:
                     textures.append(texture)
         if len(textures) == 0:
             return None
@@ -1351,11 +1427,10 @@ class ClipboardData:
     
     # set object transform
     def set_object_transform(self, obj_data):
-        coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
         obj_transform = obj_data.get('object_transform', {})
         modo_item = modo.LocatorSuperType(self.item)
         self.items.append(modo_item)
-        if 'y_up_rh' in coord:
+        if 'y_up_rh' in self.coord:
             modo_item.position.set(obj_transform.get('translation', [0.0, 0.0, 0.0]))
             modo_item.scale.set(obj_transform.get('scale', [1.0, 1.0, 1.0]))
             rotation_euler = obj_transform.get('rotation_euler')
@@ -1390,9 +1465,9 @@ class ClipboardData:
             matrix = mat_loc * mat_rot * mat_scl
             #print(f"** matrix_local {matrix}")
             matrix.transpose()
-            if 'z_up_rh' in coord:
+            if 'z_up_rh' in self.coord:
                 matrix = modo.Matrix4(B2M) * matrix * modo.Matrix4(M2B)
-            elif 'y_up_lh' in coord:
+            elif 'y_up_lh' in self.coord:
                 matrix = modo.Matrix4(L2M) * matrix * modo.Matrix4(M2L)
             pos = matrix.position
             scl = [modo.Vector3(matrix[i]).length() for i in range(3)]
@@ -1450,6 +1525,9 @@ class ClipboardData:
 
         self.replace_material = replace_material
         self.import_transform = import_transform
+    
+        self.coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
+        self.unit_scale = float(self.data.get('metadata', {}).get('unit_scale', 1.0))
         
         # Add a new mesh object to the scene and grab the geometry object
         self.scene = modo.Scene()
@@ -1467,6 +1545,7 @@ class ClipboardData:
             colors = mesh_data.get('colors', [])
             selection_sets = mesh_data.get('selection_sets', [])
             freestyle_faces = mesh_data.get('freestyle_faces', [])
+            normals = mesh_data.get('normals', [])
 
             if new_mesh == True:
                 if obj_data['type'] == 'MESH':
@@ -1541,6 +1620,10 @@ class ClipboardData:
             if freestyle_faces:
                 self.paste_face_freestyle(freestyle_faces)
 
+            # paste vertex normals data to geometry
+            if normals:
+                self.paste_normals(normals)
+
             #scan1.Update()
 
             scan1.SetMeshChange(0, lx.symbol.f_MESHEDIT_GEOMETRY)
@@ -1580,13 +1663,11 @@ class ClipboardData:
             self.set_parents()
 
     def paste_vertices(self, positions):
-        coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
-        unit_scale = float(self.data.get('metadata', {}).get('unit_scale', 1.0))
         self.vertex_ids = []
         self.base_nvert = self.mesh.PointCount()
         for i, p in enumerate(positions):
-            v = convert_vector_from_coord(p, coord)
-            v *= unit_scale
+            v = convert_vector_from_coord(p, self.coord)
+            v *= self.unit_scale
             id = self.newPoint((v.x, v.y, v.z))
 
     def paste_polygons(self, polygons, materials):
@@ -1805,8 +1886,6 @@ class ClipboardData:
                 self.setWeight(vmap, v, weight)
 
     def paste_vertex_shapekeys(self, shapekeys):
-        coord = self.data.get('metadata', {}).get('coordinate_system', '').lower()
-        unit_scale = float(self.data.get('metadata', {}).get('unit_scale', 1.0))
         base_positions = None
         for shapekey in shapekeys:
             name = shapekey.get('name')
@@ -1822,8 +1901,8 @@ class ClipboardData:
             for pos_data in shapekey.get('positions', []):
                 index = pos_data.get('index')
                 pos = modo.Vector3(pos_data.get('position'))
-                pos = convert_vector_from_coord(pos, coord)
-                pos *= unit_scale
+                pos = convert_vector_from_coord(pos, self.coord)
+                pos *= self.unit_scale
                 v = self.Point(self.vertex_ids[index])
                 if use_relative:
                     if base_positions is None:
@@ -1831,8 +1910,8 @@ class ClipboardData:
                     else:
                         base_data = base_positions[index]
                         base_pos = modo.Vector3(base_data.get('position'))
-                        base_pos = convert_vector_from_coord(base_pos, coord)
-                        base_pos *= unit_scale
+                        base_pos = convert_vector_from_coord(base_pos, self.coord)
+                        base_pos *= self.unit_scale
                         pos -= base_pos
                 self.setMorph(vmap, v, pos)
 
@@ -1885,3 +1964,20 @@ class ClipboardData:
             if use_freestyle_mark:
                 p = self.Polygon(self.polygon_ids[index])
                 self.setPartTag(p, '_Freestyle')
+
+    def paste_normals(self, normals):
+        rev = self.reverse_face_winding()
+        vmap = self.lookupMapAny(lx.symbol.i_VMAP_NORMAL)
+        if not vmap:
+            vmap = self.addMap(lx.symbol.i_VMAP_NORMAL, 'Vertex Normal')
+        for face_normal in normals:
+            index = face_normal.get('index')
+            values = face_normal.get('values', [])
+            if rev:
+                values.reverse()
+            poly_id = self.polygon_ids[index]
+            p = self.Polygon(poly_id)
+            for i in range(p.VertexCount()):
+                point_id = p.VertexByIndex(i)
+                vec = convert_vector_from_coord(values[i], self.coord)
+                self.setCornerNormal(vmap, p, point_id, vec)

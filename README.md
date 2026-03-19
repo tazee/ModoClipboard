@@ -123,3 +123,7 @@ Enabling **Import Transform** will set the object's translation, rotation, scale
 ### v1.2.1 Bug Fix
 
 - Fixed a bug about freestyle edges
+
+### v1.2.2 Minor Changes
+
+- Support vertex normals
