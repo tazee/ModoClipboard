@@ -1290,7 +1290,7 @@ class ClipboardData:
                 'name': name,
                 'base_color': diffCol
             }
-            mat_data['normal'] = material.channel('normal').get()
+            mat_data['roughness'] = material.channel('rough').get()
             # extract texture data for the material
             textures = self.copy_textures(material)
             if textures is not None:
