@@ -127,3 +127,8 @@ Enabling **Import Transform** will set the object's translation, rotation, scale
 ### v1.2.2 Minor Changes
 
 - Support vertex normals
+
+### v1.2.3 Bug Fix
+
+- Set squared edge weight to be compatible with Blender's Crease Edge
+- Support copy and paste roughness and normal texture maps
