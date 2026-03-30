@@ -30,6 +30,7 @@ from datetime import datetime
 import os
 import tempfile
 import pathlib
+import math
 
 use_msgpack = False
 try:
@@ -1192,7 +1193,11 @@ class ClipboardData:
         effect = channel.get()
         if effect == 'diffColor':
             return 'base_color'
-        return None
+        elif effect == 'normal':
+            return 'normal'
+        elif effect == 'rough':
+            return 'roughness'
+        return effect
     
     def get_imageMap_items(self):
         return [item for item in self.scene.items() if item.type == 'imageMap']
@@ -1245,6 +1250,12 @@ class ClipboardData:
                             continue
                         filename = channel.get()
                         texture['image'] = filename
+                        channel = it.channel("colorspace")
+                        if channel is None:
+                            continue
+                        colorspace = self.convert_colorspace_from(channel.get())
+                        if colorspace is not None:
+                            texture['colorspace'] = colorspace
 
                 if texture['uv_map'] is not None and texture['image'] is not None:
                     textures.append(texture)
@@ -1279,6 +1290,7 @@ class ClipboardData:
                 'name': name,
                 'base_color': diffCol
             }
+            mat_data['normal'] = material.channel('normal').get()
             # extract texture data for the material
             textures = self.copy_textures(material)
             if textures is not None:
@@ -1331,7 +1343,8 @@ class ClipboardData:
                 e = self.EdgeByIndex(i)
                 if e.MapEvaluate(id_subdiv, storageBuffer) == True:
                     w = storageBuffer.get()
-                    crease_edges[i] = w[0]
+                    # Blender's edge crease = sqrt (w) (See Blender's FBX importer)
+                    crease_edges[i] = math.sqrt(w[0])
         # uv seam edges
         seam_edges = [False] * self.mesh.EdgeCount()
         if id_seam is not None:
@@ -1715,7 +1728,8 @@ class ClipboardData:
                     continue
                 weight = edge.get('attributes', {}).get('crease_edge', 0.0)
                 if weight > 0.0:
-                    self.setSubdivWeight(vmap, e, weight)
+                    # Blender's edge crease = sqrt (w) (See Blender's FBX importer)
+                    self.setSubdivWeight(vmap, e, weight * weight)
         # UV Seam map
         vmap = self.lookupMap(i_VMAP_SEAM, "_Seam")
         for edge in edges:
@@ -1742,7 +1756,11 @@ class ClipboardData:
     def get_type_name(self, type):
         if type == 'base_color':
             return 'diffColor'
-        return None
+        elif type == 'normal':
+            return 'normal'
+        elif type == 'roughness':
+            return 'rough'
+        return type
     
     def find_item_by_name(self, name, type):
         for material in self.scene.items(type):
@@ -1763,17 +1781,20 @@ class ClipboardData:
             uv_map_name = tex.get('uv_map') or ''
             if not img_path:
                 continue
+            colorspace = self.convert_colorspace_to(tex.get('colorspace'))
             if base_dir and not os.path.isabs(img_path):
                 candidate = os.path.join(base_dir, img_path)
                 if os.path.exists(candidate):
                     img_path = candidate
             name = os.path.basename(img_path)
-            #print(f"image_path {img_path} name {name}")
             layer = self.find_item_by_name(name, 'imageMap')
             if layer is None:
                 layer = self.scene.addItem('imageMap')
                 layer.SetName(name)
-                layer.channel('effect').set(effect)
+                try:
+                    layer.channel('effect').set(effect)
+                except Exception:
+                    pass
                 layer.setParent(mask, index=1)
             graph = layer.itemGraph(lx.symbol.sGRAPH_SHADELOC)
             item_image = None
@@ -1792,6 +1813,8 @@ class ClipboardData:
                 item = self.scene.addItem('videoStill')
                 graph.AddLink(layer, item)
                 item.channel('filename').set(img_path)
+                if colorspace:
+                    item.channel('colorspace').set(colorspace)
             if item_txtrLocator is None:
                 item = self.scene.addItem('txtrLocator')
                 graph.AddLink(layer, item)
@@ -1799,6 +1822,26 @@ class ClipboardData:
                 if uv_map_name:
                     item.channel('uvMap').set(uv_map_name)
 
+
+    def convert_colorspace_from(self, colorspace):
+        if colorspace is None:
+            return None
+        if 'sRGB' in colorspace:
+            return 'sRGB'
+        elif '(none)' in colorspace:
+            return 'Non-Color'
+        else:
+            return 'Non-Color'
+
+    def convert_colorspace_to(self, colorspace):
+        if colorspace is None:
+            return None
+        if 'sRGB' in colorspace:
+            return 'nuke-default:sRGB'
+        elif 'Non-Color' in colorspace:
+            return '(none)'
+        else:
+            return '(none)'
 
     def paste_materials(self, materials):
         for material in materials:
@@ -1813,6 +1856,8 @@ class ClipboardData:
                     continue
             mat = self.scene.addMaterial(name=mat_name)
             mat.channel('diffCol').set(col)
+            if 'roughness' in material:
+                mat.channel('rough').set(material.get('roughness', 0.4))
             mask = self.find_item_by_name(name, 'mask')
             if mask is not None and self.replace_material:
                 self.scene.removeItems(mask, children=True)
