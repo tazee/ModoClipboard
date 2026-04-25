@@ -346,7 +346,7 @@ code {
 	font-size: inherit;
 }
 
-/* Page Break : use <div class="page"/> to insert page break
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
 -------------------------------------------------------- */
 .page {
 	page-break-after: always;
@@ -407,9 +407,9 @@ Import the object transform data such as location, rotation, scale and parenting
 <div align="left">
 <img src="images/UI.png" style='max-height: 620px; object-fit: contain'/>
 </div>
-<h3 id="cut-copybr">Cut, Copy<br></h3>
+<h3 id="cut-copy">Cut, Copy<br></h3>
 <p><strong>Copy</strong> and <strong>Cut</strong> export the currently selected polygons or all mesh data to the clipboard. Cut exports the data and then deletes the currently selected polygon data.</p>
-<h3 id="pastebr">Paste<br></h3>
+<h3 id="paste">Paste<br></h3>
 <p>Imports mesh data from the clipboard and constructs it onto the currently selected mesh.</p>
 <h3 id="new-mesh-from-clipboard">New Mesh from Clipboard</h3>
 <p>Builds the mesh imported from the clipboard into a newly created mesh item, replacing the current mesh.</p>
@@ -464,6 +464,11 @@ Import the object transform data such as location, rotation, scale and parenting
 <ul>
 <li>Set squared edge weight to be compatible with Blender's Crease Edge</li>
 <li>Support copy and paste roughness and normal texture maps</li>
+</ul>
+<h3 id="v124-bug-fix">v1.2.4 Bug Fix</h3>
+<ul>
+<li>Resolved image filename in asset path</li>
+<li>Fixed negative edge weight issue</li>
 </ul>
 
 </body>
