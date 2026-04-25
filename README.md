@@ -132,3 +132,8 @@ Enabling **Import Transform** will set the object's translation, rotation, scale
 
 - Set squared edge weight to be compatible with Blender's Crease Edge
 - Support copy and paste roughness and normal texture maps
+
+### v1.2.4 Bug Fix
+
+- Resolved image filename in asset path
+- Fixed negative edge weight issue

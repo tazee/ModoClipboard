@@ -1244,12 +1244,13 @@ class ClipboardData:
                         uvmap = channel.get()
                         texture['uv_map'] = uvmap
                     # Video Still (image file)
-                    elif it.type == 'videoStill':
+                    elif it.type == 'videoStill' or  it.type == 'videoBlank':
                         channel = it.channel("filename")
                         if channel is None:
                             continue
                         filename = channel.get()
-                        texture['image'] = filename
+                        fileSrv = lx.service.File()
+                        texture['image'] = fileSrv.ToLocalAlias(filename)
                         channel = it.channel("colorspace")
                         if channel is None:
                             continue
@@ -1344,7 +1345,8 @@ class ClipboardData:
                 if e.MapEvaluate(id_subdiv, storageBuffer) == True:
                     w = storageBuffer.get()
                     # Blender's edge crease = sqrt (w) (See Blender's FBX importer)
-                    crease_edges[i] = math.sqrt(w[0])
+                    if w[0] > 0.0:
+                        crease_edges[i] = math.sqrt(w[0])
         # uv seam edges
         seam_edges = [False] * self.mesh.EdgeCount()
         if id_seam is not None:
